@@ -61,6 +61,7 @@ Times must be ISO 8601 **with a timezone** (`Z` or `+02:00`). A timestamp withou
 | `tests` | no | test[] | Test results. Only `failed` tests contribute. |
 | `incidentEvents` | no | event[] | Operator/alert events shown in the timeline. |
 | `verification` | no | object | Fixture-only stored verification. Never treated as a live verification result. |
+| `provenance` | no | object | Ingestion provenance. May include parser version, artifact hashes, source paths, and ingestion time. Treat paths as sensitive. |
 
 ## Commit
 
@@ -145,6 +146,10 @@ When `commits` is empty, the repository commits inside the candidate window beco
 - Candidate commits: 500 maximum when enriched from Git.
 - Verification output is capped at 256 KB per command, with a 10-minute maximum timeout.
 - Real verification rejects dirty worktrees and runs one verification at a time.
+
+## Ingestion provenance
+
+`patchtrace ingest` records an optional `provenance.ingestion` object in the generated bundle. Each imported artifact includes a SHA-256 hash, source path when supplied, parser name/version, artifact kind, and ingestion time. This metadata makes it possible to audit which local evidence produced a ranking; it may contain private filesystem paths and should be treated as sensitive.
 
 ## Security notes
 

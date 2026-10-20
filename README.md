@@ -175,6 +175,22 @@ Key rules:
 
 See [`docs/INCIDENT_BUNDLE.md`](docs/INCIDENT_BUNDLE.md) for every field and [`docs/incident-bundle.schema.json`](docs/incident-bundle.schema.json) for the JSON Schema.
 
+### Build a bundle from local evidence
+
+Use the local CLI to merge repository history, deployment CSV, and JUnit results into a validated bundle:
+
+```bash
+node bin/patchtrace.mjs ingest incident.json \
+  --repo /path/to/repository \
+  --deployments deployments.csv \
+  --junit test-results.xml \
+  --incident-start 2026-10-20T14:09:00Z \
+  --environment production \
+  --out normalized-incident.json
+```
+
+The generated bundle keeps the v1 contract and adds best-effort ingestion provenance with artifact hashes, parser versions, source paths, and ingestion time. Treat source paths as sensitive local metadata.
+
 ## How ranking works
 
 Each candidate commit receives a deterministic score between `0` and `1`:
@@ -218,6 +234,7 @@ node bin/patchtrace.mjs doctor --json
 ```text
 patchtrace doctor [--json]
 patchtrace validate <bundle.json> [--json]
+patchtrace ingest <bundle.json> --out <bundle.json> [--repo <path>] [--deployments <csv>] [--junit <xml>] [--incident-start <timestamp>] [--environment <name>] [--max-commits <n>]
 patchtrace analyze <bundle.json> [--repo <path>] [--max-commits <n>] [--generated-at <timestamp>] [--json] [--out <file>] [--format human|json|markdown|csv]
 patchtrace verify --repo <path> --sha <sha> [--test-command <command|json>] [--timeout <ms>] [--mainline <n>] [--json] [--out <file>]
 patchtrace report <bundle.json> [--repo <path>] [--verification <json>] [--max-commits <n>] [--generated-at <timestamp>] [--out <file>] [--format markdown|json|csv]

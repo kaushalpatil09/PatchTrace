@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +33,49 @@ test('validates the sample bundle and reports invalid bundles with exit code 2',
   const invalid = await runCli(['validate', invalidPath]);
   assert.equal(invalid.code, 2);
   assert.match(invalid.stderr, /is invalid/);
+});
+
+test('ingests local deployment and JUnit evidence into a versioned bundle', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'patchtrace-ingest-cli-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const inputPath = join(directory, 'input.json');
+  const deploymentsPath = join(directory, 'deployments.csv');
+  const junitPath = join(directory, 'results.xml');
+  const outputPath = join(directory, 'bundle.json');
+  await writeFile(inputPath, JSON.stringify({
+    title: 'Imported checkout incident',
+    commits: []
+  }), 'utf8');
+  await writeFile(deploymentsPath, 'commitSha,timestamp\na81e7c2,2026-10-20T14:00:00Z\n', 'utf8');
+  await writeFile(junitPath, '<testsuite><testcase name="VAT-07" file="src/tax.ts"><failure message="bad tax"/></testcase></testsuite>', 'utf8');
+
+  const result = await runCli([
+    'ingest', inputPath,
+    '--incident-start', '2026-10-20T14:09:00Z',
+    '--environment', 'production',
+    '--deployments', deploymentsPath,
+    '--junit', junitPath,
+    '--out', outputPath
+  ]);
+  assert.equal(result.code, 0);
+  const bundle = JSON.parse(await readFile(outputPath, 'utf8'));
+  assert.equal(bundle.schemaVersion, 1);
+  assert.equal(bundle.environment, 'production');
+  assert.equal(bundle.incidentStart, '2026-10-20T14:09:00Z');
+  assert.equal(bundle.provenance.ingestion.artifacts.length, 3);
+  assert.match(bundle.provenance.ingestion.artifacts[1].sha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(bundle.deployments, [{
+    commitSha: 'a81e7c2',
+    timestamp: '2026-10-20T14:00:00Z',
+    environment: 'production'
+  }]);
+  assert.deepEqual(bundle.tests, [{
+    name: 'VAT-07',
+    status: 'failed',
+    timestamp: '2026-10-20T14:09:00Z',
+    relatedFiles: ['src/tax.ts'],
+    errorSignature: 'bad tax'
+  }]);
 });
 
 test('analyzes a bundle into a deterministic JSON report', async () => {

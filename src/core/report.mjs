@@ -38,9 +38,19 @@ function percent(value) {
 
 function evidenceLines(suspect) {
   return (suspect.evidence ?? []).map((item) => {
-    const origin = item.origin ? ` _(${md(item.origin)})_` : '';
-    return `- ${md(item.text)}${origin}`;
+    const origin = item.origin ? `origin: ${md(item.origin)}` : 'origin: unspecified';
+    const source = item.source ? `source: \`${md(item.source)}\`` : 'source: unavailable';
+    return `- ${md(item.text)} _(${origin}; ${source})_`;
   }).join('\n');
+}
+
+function whyNotLines(suspect) {
+  const reasons = Array.isArray(suspect.whyNot) ? suspect.whyNot : [];
+  if (!reasons.length) return '';
+  return [
+    'Why this ranks below the top suspect:',
+    ...reasons.slice(0, 5).map((reason) => `- ${md(reason)}`)
+  ].join('\n');
 }
 
 export function buildReport({
@@ -144,6 +154,8 @@ export function renderMarkdown(report) {
       lines.push(`Missing signals: ${suspect.missingSignals.map((signal) => md(signal)).join(', ')}`, '');
     }
     lines.push(evidenceLines(suspect) || '- No evidence recorded.', '');
+    const whyNot = whyNotLines(suspect);
+    if (whyNot) lines.push(whyNot, '');
   }
 
   if (verification) {

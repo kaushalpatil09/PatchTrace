@@ -30,11 +30,19 @@ See `docs/IMPLEMENTATION_STATUS.md` for what is verified and `docs/PRODUCTION_RE
 - [x] Report Git availability, readiness, and verification activity in `/api/health`.
 - [x] Add verification audit timing and cleanup fields.
 - [x] Deep-redact report JSON and add a synthetic maximum-size analysis/report test.
+- [x] Reject absolute repository links before verification and add a source-integrity regression test.
+- [x] Make fixture verification server-owned and label fixture versus live results.
+- [x] Resolve short/full deployment SHAs and refuse ambiguous prefixes.
+- [x] Bound and strictly validate JUnit XML structure.
+- [x] Add local `patchtrace ingest` for deployment CSV, JUnit XML, and Git evidence.
+- [x] Record ingestion artifact hashes, parser versions, source paths, and ingestion time.
+- [x] Add bounded why-not explanations and evidence source references.
+- [x] Add stricter report request validation and safe repository error mapping.
 
 ## Next: production hardening
 
 - [ ] Container/VM verification runner behind the same result contract.
-- [ ] API request/response schema validation and OpenAPI documentation (route docs exist).
+- [ ] Complete API request/response schema validation and OpenAPI documentation (the report request contract is now validated; route docs exist).
 - [ ] Dependency blast-radius derivation from a package graph.
 - [ ] Execute and validate the CI matrix on real runners.
 - [ ] Large-repository and slow-command limit tests (the maximum bundle size is covered).

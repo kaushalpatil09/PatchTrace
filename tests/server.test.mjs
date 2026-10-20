@@ -210,6 +210,16 @@ test('builds a redacted report JSON through the API', async () => {
     body: JSON.stringify({ analysis: { incident: {}, suspects: 'not-an-array' } })
   });
   assert.equal(invalid.status, 400);
+
+  const incomplete = await fetch(`${base}/api/report`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ analysis: { incident: {}, suspects: [], timeline: [] } })
+  });
+  assert.equal(incomplete.status, 400);
+  const incompleteBody = await incomplete.json();
+  assert.equal(incompleteBody.error.code, 'invalid_request');
+  assert.ok(incompleteBody.error.details.some((detail) => detail.path === 'analysis.schemaVersion'));
 });
 
 test('server responses cannot be given a different apiVersion by fixture data', async () => {

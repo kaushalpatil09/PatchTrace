@@ -226,6 +226,47 @@ function verificationErrorResponse(error) {
   };
 }
 
+function validateReportRequest(body) {
+  const errors = [];
+  const add = (path, message) => errors.push({ path, message });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    add('', 'Report request must be a JSON object.');
+    return errors;
+  }
+
+  const analysis = body.analysis;
+  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) {
+    add('analysis', 'analysis must be an object.');
+  } else {
+    if (analysis.schemaVersion !== 1) add('analysis.schemaVersion', 'analysis.schemaVersion must be 1.');
+    if (!analysis.incident || typeof analysis.incident !== 'object' || Array.isArray(analysis.incident)) {
+      add('analysis.incident', 'analysis.incident must be an object.');
+    } else {
+      for (const field of ['title', 'environment', 'incidentStart']) {
+        if (typeof analysis.incident[field] !== 'string' || !analysis.incident[field].trim()) {
+          add(`analysis.incident.${field}`, `${field} is required.`);
+        }
+      }
+    }
+    if (!Array.isArray(analysis.suspects)) {
+      add('analysis.suspects', 'analysis.suspects must be an array.');
+    }
+    if (!Array.isArray(analysis.timeline)) add('analysis.timeline', 'analysis.timeline must be an array.');
+    if (!Number.isFinite(analysis.candidateWindowMinutes) || analysis.candidateWindowMinutes <= 0) {
+      add('analysis.candidateWindowMinutes', 'candidateWindowMinutes must be a positive number.');
+    }
+  }
+  if (body.verification !== undefined && body.verification !== null
+    && (typeof body.verification !== 'object' || Array.isArray(body.verification))) {
+    add('verification', 'verification must be a JSON object or null.');
+  }
+  if (body.provenance !== undefined
+    && (!body.provenance || typeof body.provenance !== 'object' || Array.isArray(body.provenance))) {
+    add('provenance', 'provenance must be a JSON object.');
+  }
+  return errors;
+}
+
 export function createPatchTraceServer(options = {}) {
   const token = options.token || process.env.PATCHTRACE_TOKEN || randomBytes(32).toString('hex');
   const enableRealVerification = options.enableRealVerification
@@ -322,24 +363,9 @@ export function createPatchTraceServer(options = {}) {
 
       if (request.method === 'POST' && pathname === '/api/report') {
         const body = await readJsonBody(request);
-        if (!body || typeof body !== 'object' || Array.isArray(body)) {
-          sendError(response, 400, 'invalid_request', 'Report request must be a JSON object.');
-          return;
-        }
-        if (!body.analysis || typeof body.analysis !== 'object' || Array.isArray(body.analysis)
-          || !body.analysis.incident || typeof body.analysis.incident !== 'object' || Array.isArray(body.analysis.incident)
-          || !Array.isArray(body.analysis.suspects)) {
-          sendError(response, 400, 'invalid_request', 'Report request requires an analysis with incident and suspects.');
-          return;
-        }
-        if (body.verification !== undefined && body.verification !== null
-          && (typeof body.verification !== 'object' || Array.isArray(body.verification))) {
-          sendError(response, 400, 'invalid_request', 'verification must be a JSON object or null.');
-          return;
-        }
-        if (body.provenance !== undefined
-          && (!body.provenance || typeof body.provenance !== 'object' || Array.isArray(body.provenance))) {
-          sendError(response, 400, 'invalid_request', 'provenance must be a JSON object.');
+        const requestErrors = validateReportRequest(body);
+        if (requestErrors.length) {
+          sendError(response, 400, 'invalid_request', 'Report request does not match the analysis contract.', requestErrors);
           return;
         }
         const report = buildReport({

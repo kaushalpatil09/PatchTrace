@@ -126,6 +126,25 @@ test('reports coverage, missing signals, contributions, and provided sources', (
   assert.equal(suspect.contributions.temporal, 0.3 * suspect.factors.temporal);
 });
 
+test('adds deterministic why-not reasons relative to the top suspect', () => {
+  const analysis = analyzeIncident(fixture);
+  const [top, second, third] = analysis.suspects;
+
+  assert.deepEqual(top.whyNot, []);
+  assert.ok(second.whyNot.some((reason) => /weaker file-overlap evidence/i.test(reason)));
+  assert.ok(second.whyNot.some((reason) => /weaker test-overlap evidence/i.test(reason)));
+  assert.ok(third.whyNot.some((reason) => /missing temporal evidence/i.test(reason)));
+  assert.ok(analysis.suspects.every((suspect) => suspect.whyNot.length <= 5));
+  assert.doesNotMatch(analysis.suspects.flatMap((suspect) => suspect.whyNot).join(' '), /probability|likely|chance/i);
+
+  const single = analyzeIncident({ ...fixture, commits: [fixture.commits[0]] });
+  assert.equal(single.suspects.length, 1);
+  assert.deepEqual(single.suspects[0].whyNot, []);
+
+  const empty = analyzeIncident({ ...fixture, commits: [] });
+  assert.deepEqual(empty.suspects, []);
+});
+
 test('returns a warning instead of a suspect when no commits are in range', () => {
   const analysis = analyzeIncident({ ...fixture, commits: [] });
   assert.equal(analysis.suspects.length, 0);
@@ -165,6 +184,13 @@ test('rejects malformed JUnit XML', () => {
   assert.throws(() => parseJunitXml('<testcase name="unterminated"'), /unterminated/i);
   assert.throws(() => parseJunitXml('<testcase name="x">'), /missing <\/testcase>/);
   assert.throws(() => parseJunitXml('<testcase name="x"><testcase name="y"/></testcase>'), /nested/);
+  assert.throws(() => parseJunitXml('<testsuite><testcase name="x"></testsuite></testcase>'), /mismatched/i);
+});
+
+test('bounds JUnit input, tag count, and nesting depth', () => {
+  assert.throws(() => parseJunitXml('x'.repeat(1_000_001)), /exceeds|limit/i);
+  assert.throws(() => parseJunitXml(Array.from({ length: 10_001 }, () => '<testcase name="x"/>').join('')), /tag limit/i);
+  assert.throws(() => parseJunitXml(`${'<testsuite>'.repeat(257)}<testcase name="x"/>${'</testsuite>'.repeat(256)}`), /depth|missing|mismatched/i);
 });
 
 test('parses BOM, CRLF, quoted commas, and single-row CSV data', () => {

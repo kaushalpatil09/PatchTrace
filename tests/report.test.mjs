@@ -18,6 +18,8 @@ test('builds a versioned report with analysis, verification, and provenance', ()
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.generatedAt, '2026-10-20T00:00:00Z');
   assert.equal(report.analysis.suspects[0].sha, 'a81e7c2');
+  assert.deepEqual(report.analysis.suspects[1].whyNot, analysis.suspects[1].whyNot);
+  assert.equal(report.analysis.suspects[0].evidence[0].source, 'deployment:a81e7c2');
 });
 
 test('renders an inspectable Markdown report with caveats and evidence', () => {
@@ -34,6 +36,9 @@ test('renders an inspectable Markdown report with caveats and evidence', () => {
   assert.match(markdown, /## Timeline/);
   assert.match(markdown, /2026-10-20T11:30:00Z/);
   assert.match(markdown, /Commit 12fa0b1 recorded/);
+  assert.match(markdown, /source: `deployment:a81e7c2`/);
+  assert.match(markdown, /Why this ranks below the top suspect/);
+  assert.match(markdown, /weaker file-overlap evidence/i);
   assert.match(markdown, /## Uncertainty and limits/);
   assert.match(markdown, /not a root-cause proof/);
   assert.match(markdown, /Bundle SHA-256/);
@@ -100,6 +105,8 @@ test('escapes HTML and formula-like cells in reports', () => {
   modified.incident.title = '<b>title</b>';
   modified.incident.environment = '<i>production</i>';
   modified.suspects[0].message = '=1+1';
+  modified.suspects[0].evidence[0].source = '<source-ref>';
+  modified.suspects[1].whyNot = ['<b>unsafe why-not</b>'];
   const markdown = renderMarkdown(buildReport({
     analysis: modified,
     provenance: {
@@ -116,6 +123,9 @@ test('escapes HTML and formula-like cells in reports', () => {
   assert.match(markdown, /&lt;i&gt;production/);
   assert.match(markdown, /````json/);
   assert.match(markdown, /\[redacted\]/);
+  assert.doesNotMatch(markdown, /<source-ref>|<b>unsafe why-not<\/b>/i);
+  assert.match(markdown, /&lt;source-ref&gt;/);
+  assert.match(markdown, /&lt;b&gt;unsafe why-not/);
 
   const csv = renderCsv(modified);
   assert.ok(csv.includes("'=1+1"));

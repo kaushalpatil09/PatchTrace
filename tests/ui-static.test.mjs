@@ -29,3 +29,12 @@ test('the UI uses the local API and exposes bundle import and report download', 
   assert.match(html, /id="download-analysis"/);
   assert.doesNotMatch(html, /https?:\/\//i);
 });
+
+test('the UI renders evidence source references and bounded why-not details safely', () => {
+  assert.match(javascript, /item\.source/);
+  assert.match(javascript, /source ref:/);
+  assert.match(javascript, /suspect\.whyNot/);
+  assert.match(javascript, /WHY NOT THE TOP SUSPECT/);
+  assert.match(javascript, /escapeHtml\(item\.source/);
+  assert.match(javascript, /escapeHtml\(reason\)/);
+});

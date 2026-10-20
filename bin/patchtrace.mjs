@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { analyzeIncident, validateIncident } from '../src/core/analysis.mjs';
 import { parseTestCommand } from '../src/core/command-line.mjs';
 import { enrichIncidentFromRepository } from '../src/core/git-adapter.mjs';
+import { buildIngestedBundle } from '../src/core/ingestion.mjs';
 import { buildReport, renderCsv, renderMarkdown } from '../src/core/report.mjs';
 import { runCommand, sweepStaleWorkspaces, verifyRollback } from '../src/core/verification.mjs';
 
@@ -28,6 +29,7 @@ function usage() {
 Usage:
   patchtrace doctor [--json]
   patchtrace validate <bundle.json> [--json]
+  patchtrace ingest <bundle.json> --out <bundle.json> [--repo <path>] [--deployments <csv>] [--junit <xml>] [--incident-start <timestamp>] [--environment <name>]
   patchtrace analyze <bundle.json> [--repo <path>] [--json] [--out <file>] [--format human|json|markdown|csv]
   patchtrace verify --repo <path> --sha <sha> [--test-command <command|json>] [--timeout <ms>] [--json]
   patchtrace report <bundle.json> [--repo <path>] [--verification <json>] [--out <file>] [--format markdown|json|csv]
@@ -238,6 +240,82 @@ async function commandValidate(args) {
     for (const error of result.errors) process.stderr.write(`  ${error.path || 'bundle'}: ${error.message}\n`);
   }
   return result.valid ? 0 : 2;
+}
+
+async function readOptionalIngestInput(path, label) {
+  if (!path) return undefined;
+  try {
+    return await readText(path);
+  } catch (error) {
+    if (error instanceof CliError) {
+      throw new CliError(`Could not read --${label} input ${path}: ${error.message}`, error.exitCode);
+    }
+    throw error;
+  }
+}
+
+async function commandIngest(args) {
+  const parsed = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      repo: { type: 'string' },
+      deployments: { type: 'string' },
+      junit: { type: 'string' },
+      'incident-start': { type: 'string' },
+      environment: { type: 'string' },
+      out: { type: 'string' },
+      'max-commits': { type: 'string' },
+      help: { type: 'boolean' }
+    }
+  });
+  if (parsed.values.help || !parsed.positionals[0]) {
+    process.stdout.write(usage());
+    return parsed.values.help ? 0 : 2;
+  }
+  if (parsed.positionals.length > 1) {
+    throw new CliError('ingest accepts exactly one bundle JSON input path.', 2);
+  }
+  if (!parsed.values.out) {
+    throw new CliError('ingest requires --out <bundle.json> so the versioned bundle can be written locally.', 2);
+  }
+
+  const { bundle, text } = await readBundle(parsed.positionals[0]);
+  const [deploymentsCsv, junitXml] = await Promise.all([
+    readOptionalIngestInput(parsed.values.deployments, 'deployments'),
+    readOptionalIngestInput(parsed.values.junit, 'junit')
+  ]);
+  const maxCommits = parsed.values['max-commits']
+    ? parseInteger(parsed.values['max-commits'], '--max-commits', { min: 1, max: 500 })
+    : undefined;
+
+  let result;
+  try {
+    result = await buildIngestedBundle(bundle, {
+      repoPath: parsed.values.repo,
+      deploymentsCsv,
+      junitXml,
+      incidentStart: parsed.values['incident-start'],
+      environment: parsed.values.environment,
+      maxCommits,
+      bundleText: text,
+      bundleSourcePath: parsed.positionals[0],
+      deploymentsSourcePath: parsed.values.deployments,
+      junitSourcePath: parsed.values.junit
+    });
+  } catch (error) {
+    throw new CliError(`Could not ingest bundle: ${error.message}`, error.code === 'invalid_bundle' ? 2 : 2);
+  }
+
+  try {
+    await output(JSON.stringify(result.bundle, null, 2), parsed.values.out);
+  } catch (error) {
+    if (error instanceof CliError) {
+      throw new CliError(`Could not write ingested bundle ${parsed.values.out}: ${error.message}`, error.exitCode);
+    }
+    throw error;
+  }
+  return 0;
 }
 
 async function prepareAnalysis(bundle, text, { repo, maxCommits }) {
@@ -451,6 +529,7 @@ async function main(argv) {
   switch (command) {
     case 'doctor': return commandDoctor(args);
     case 'validate': return commandValidate(args);
+    case 'ingest': return commandIngest(args);
     case 'analyze': return commandAnalyze(args);
     case 'verify': return commandVerify(args);
     case 'report': return commandReport(args);

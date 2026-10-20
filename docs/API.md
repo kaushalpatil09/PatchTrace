@@ -117,7 +117,7 @@ Builds a versioned report from an analysis response and an optional verification
 }
 ```
 
-Success: `200` with the report object (`schemaVersion`, `generatedAt`, `toolVersion`, `analysis`, `verification`, `provenance`, and `redaction`). Report JSON is deep-redacted with the same best-effort rules as Markdown/CSV; `redaction.matches` records the number of replacements. Invalid shapes return `400` with `error.code = "invalid_request"`. The request limit is 5 MB. Raw analysis responses remain raw data; treat them as sensitive.
+Success: `200` with the report object (`schemaVersion`, `generatedAt`, `toolVersion`, `analysis`, `verification`, `provenance`, and `redaction`). Report JSON is deep-redacted with the same best-effort rules as Markdown/CSV; `redaction.matches` records the number of replacements. The request must contain an analysis with `schemaVersion: 1`, an incident with `title`, `environment`, and `incidentStart`, suspects, timeline, and a positive `candidateWindowMinutes`; invalid shapes return `400` with `error.code = "invalid_request"` and field-level details. The request limit is 5 MB. Raw analysis responses remain raw data; treat them as sensitive.
 
 ### `POST /api/verify`
 
@@ -134,7 +134,7 @@ Runs only against stored fixture data. It does not execute a repository.
 }
 ```
 
-The response is the stored fixture verification result.
+The response is the server-owned stored fixture verification result and includes `source: "fixture"`. Client-supplied `analysis.verification` data is ignored.
 
 #### Real repository verification
 
@@ -159,6 +159,7 @@ The baseline command runs twice by default. If the runs disagree on pass/fail, t
 Result fields:
 
 - `status`: `passed`, `failed`, `timeout`, `cancelled`, `missing_history`, or `unsupported_layout`.
+- `source`: `fixture` for server-owned demo evidence or `live` for a real repository run.
 - `outcome`: `confirmed`, `not_confirmed`, `inconclusive`, `timeout`, `cancelled`, `invalid_repo`, `source_changed`, or `command_error`.
 - `reason` and `message`. A dirty worktree returns `reason = "dirty_worktree"` and `outcome = "invalid_repo"` before any copy or command.
 - `baseline`: the first baseline command result; `baselineRuns` contains every baseline attempt.

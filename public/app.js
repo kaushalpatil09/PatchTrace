@@ -250,6 +250,8 @@ function renderDetails(suspect) {
   const missing = new Set(suspect.missingSignals || []);
   const sources = suspect.signalSources || {};
   const hasFixtureVerification = Boolean(state.analysis.verification?.[suspect.sha]);
+  const evidence = Array.isArray(suspect.evidence) ? suspect.evidence : [];
+  const whyNot = Array.isArray(suspect.whyNot) ? suspect.whyNot.slice(0, 5) : [];
 
   $('#detail-panel').innerHTML = `
     <div class="eyebrow">SELECTED CANDIDATE</div>
@@ -282,12 +284,18 @@ function renderDetails(suspect) {
 
     <div class="eyebrow">EVIDENCE</div>
     <div class="evidence-list">
-      ${suspect.evidence.map((item) => `
+      ${evidence.map((item) => `
         <div class="evidence">
-          <span>${escapeHtml(item.text)}</span>
+          <span>${escapeHtml(item.text)} <span class="evidence-source">source ref: ${escapeHtml(item.source || 'unavailable')}</span></span>
           <span class="evidence-origin ${escapeHtml(item.origin)}">${escapeHtml(item.origin)}</span>
         </div>`).join('')}
     </div>
+
+    ${whyNot.length ? `
+      <div class="eyebrow">WHY NOT THE TOP SUSPECT</div>
+      <div class="warning-list">
+        ${whyNot.map((reason) => `<div class="warning">${escapeHtml(reason)}</div>`).join('')}
+      </div>` : ''}
 
     <button id="verify-button" class="verify-button" type="button" ${hasFixtureVerification ? '' : 'disabled'}>
       ${hasFixtureVerification ? 'Run sample verification (fixture)' : 'No fixture verification for this candidate'}

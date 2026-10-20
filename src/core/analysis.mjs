@@ -8,6 +8,26 @@ const MAX_TESTS = 5000;
 const MAX_FILES = 5000;
 const MAX_EVENTS = 2000;
 const MAX_DEPLOYMENT_SHAS = 1000;
+const MAX_JUNIT_INPUT_LENGTH = 1_000_000;
+const MAX_JUNIT_TAGS = 10_000;
+const MAX_JUNIT_DEPTH = 256;
+const MAX_WHY_NOT_REASONS = 5;
+
+const RANKING_SIGNALS = Object.freeze([
+  'temporal',
+  'fileOverlap',
+  'testOverlap',
+  'diffRisk',
+  'dependencyImpact'
+]);
+
+const SIGNAL_LABELS = Object.freeze({
+  temporal: 'temporal',
+  fileOverlap: 'file-overlap',
+  testOverlap: 'test-overlap',
+  diffRisk: 'diff-risk',
+  dependencyImpact: 'dependency-impact'
+});
 
 export const SCORING_WEIGHTS = Object.freeze({
   temporal: 0.30,
@@ -157,6 +177,40 @@ function confidenceFor(score, coverage) {
   return 'low';
 }
 
+function percentText(value) {
+  return `${Math.round(clamp(Number(value)) * 100)}%`;
+}
+
+function whyNotFor(suspect, topSuspect) {
+  if (!suspect || !topSuspect || suspect === topSuspect || suspect.sha === topSuspect.sha) return [];
+
+  const topMissing = new Set(topSuspect.missingSignals ?? []);
+  const suspectMissing = new Set(suspect.missingSignals ?? []);
+  const reasons = [];
+
+  for (const signal of RANKING_SIGNALS) {
+    if (suspectMissing.has(signal) && !topMissing.has(signal)) {
+      reasons.push(`Missing ${SIGNAL_LABELS[signal]} evidence relative to top suspect ${topSuspect.sha}.`);
+      continue;
+    }
+
+    const suspectContribution = Number(suspect.contributions?.[signal] ?? 0);
+    const topContribution = Number(topSuspect.contributions?.[signal] ?? 0);
+    if (suspectContribution < topContribution) {
+      reasons.push(
+        `Weaker ${SIGNAL_LABELS[signal]} evidence than top suspect ${topSuspect.sha} `
+        + `(${percentText(suspect.factors?.[signal])} vs ${percentText(topSuspect.factors?.[signal])}).`
+      );
+    }
+  }
+
+  if (!reasons.length) {
+    reasons.push(`No ranking signal is stronger than top suspect ${topSuspect.sha}; deterministic tie-break ordering placed this candidate lower.`);
+  }
+
+  return reasons.slice(0, MAX_WHY_NOT_REASONS);
+}
+
 function decodeXml(value) {
   return String(value).replace(/&(#x?[0-9a-f]+|amp|lt|gt|quot|apos);/gi, (match, entity) => {
     const lower = entity.toLowerCase();
@@ -174,9 +228,33 @@ function decodeXml(value) {
 
 function parseAttributes(source) {
   const attributes = {};
-  const pattern = /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-  for (const match of String(source).matchAll(pattern)) {
-    attributes[match[1]] = decodeXml(match[2] ?? match[3] ?? '');
+  const text = String(source);
+  let index = 0;
+
+  while (index < text.length) {
+    while (/\s/.test(text[index] ?? '')) index += 1;
+    if (index >= text.length) break;
+
+    const nameMatch = text.slice(index).match(/^[A-Za-z_][\w:.-]*/);
+    if (!nameMatch) throw new Error('Malformed JUnit XML: invalid attribute name.');
+    const name = nameMatch[0];
+    index += name.length;
+    while (/\s/.test(text[index] ?? '')) index += 1;
+    if (text[index] !== '=') throw new Error(`Malformed JUnit XML: attribute ${name} is missing '='.`);
+    index += 1;
+    while (/\s/.test(text[index] ?? '')) index += 1;
+
+    const quote = text[index];
+    if (quote !== '"' && quote !== "'") {
+      throw new Error(`Malformed JUnit XML: attribute ${name} must use quoted text.`);
+    }
+    index += 1;
+    const valueStart = index;
+    while (index < text.length && text[index] !== quote) index += 1;
+    if (index >= text.length) throw new Error(`Malformed JUnit XML: unterminated attribute ${name}.`);
+    if (Object.hasOwn(attributes, name)) throw new Error(`Malformed JUnit XML: duplicate attribute ${name}.`);
+    attributes[name] = decodeXml(text.slice(valueStart, index));
+    index += 1;
   }
   return attributes;
 }
@@ -187,6 +265,7 @@ function localName(name) {
 
 function scanTags(xml) {
   const tags = [];
+  const stack = [];
   let index = 0;
   while (index < xml.length) {
     const start = xml.indexOf('<', index);
@@ -244,11 +323,32 @@ function scanTags(xml) {
     const whitespace = tag.search(/\s/);
     const name = whitespace === -1 ? tag : tag.slice(0, whitespace);
     const attributes = whitespace === -1 ? '' : tag.slice(whitespace + 1);
-    if (/^[A-Za-z_][\w:.-]*$/.test(name)) {
-      tags.push({ type, name, localName: localName(name), attributes, start, end: cursor + 1 });
+    if (!/^[A-Za-z_][\w:.-]*$/.test(name)) {
+      throw new Error('Malformed JUnit XML: invalid tag name.');
     }
+    if (tags.length >= MAX_JUNIT_TAGS) {
+      throw new Error(`Malformed JUnit XML: tag limit exceeded (at most ${MAX_JUNIT_TAGS} tags).`);
+    }
+    if (type === 'close') {
+      if (attributes) throw new Error(`Malformed JUnit XML: closing tag </${name}> cannot have attributes.`);
+      const open = stack.pop();
+      if (!open) throw new Error(`Malformed JUnit XML: unexpected </${name}>.`);
+      if (open.name !== name) {
+        throw new Error(`Malformed JUnit XML: mismatched closing tag </${name}>; expected </${open.name}>.`);
+      }
+    } else {
+      parseAttributes(attributes);
+      if (type === 'open') {
+        if (stack.length >= MAX_JUNIT_DEPTH) {
+          throw new Error(`Malformed JUnit XML: nesting depth exceeds ${MAX_JUNIT_DEPTH}.`);
+        }
+        stack.push({ name });
+      }
+    }
+    tags.push({ type, name, localName: localName(name), attributes, start, end: cursor + 1 });
     index = cursor + 1;
   }
+  if (stack.length) throw new Error(`Malformed JUnit XML: missing </${stack.at(-1).name}>.`);
   return tags;
 }
 
@@ -358,6 +458,9 @@ export function parseDeploymentCsv(csv) {
 
 export function parseJunitXml(xml) {
   const source = String(xml);
+  if (source.length > MAX_JUNIT_INPUT_LENGTH) {
+    throw new Error(`Malformed JUnit XML: input exceeds ${MAX_JUNIT_INPUT_LENGTH} characters.`);
+  }
   const tags = scanTags(source);
   const results = [];
   let current = null;
@@ -888,12 +991,17 @@ export function analyzeIncident(input) {
   });
   const timeline = buildTimeline(input);
   const deploymentMatches = createDeploymentMatches(input.deployments ?? [], allCommits.map((commit) => commit.sha), input.environment);
-  const suspects = candidates
+  const rankedSuspects = candidates
     .map((commit) => scoreCommit(commit, input, deploymentMatches))
     .sort((a, b) => b.score - a.score
       || b.contributions.temporal - a.contributions.temporal
       || timestamp(a.timestamp) - timestamp(b.timestamp)
       || compareText(a.sha, b.sha));
+  const topSuspect = rankedSuspects[0] ?? null;
+  const suspects = rankedSuspects.map((suspect) => ({
+    ...suspect,
+    whyNot: whyNotFor(suspect, topSuspect)
+  }));
 
   const warnings = [];
   if (!suspects.length) {
