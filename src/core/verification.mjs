@@ -350,12 +350,14 @@ export async function assertSupportedRepository(repoPath) {
     throw new SafetyError('unsupported_submodule', 'Repositories with submodules are not supported yet.');
   }
 
-  const actualTopLevel = await realpath(topLevel.stdout.trim()).catch(() => null);
-  const expected = resolve(repoPath);
-  const actual = actualTopLevel ? resolve(actualTopLevel) : null;
-  const matches = process.platform === 'win32'
-    ? Boolean(actual && actual.toLowerCase() === expected.toLowerCase())
-    : actual === expected;
+  const [actualTopLevel, expectedTopLevel] = await Promise.all([
+    realpath(topLevel.stdout.trim()).catch(() => null),
+    realpath(repoPath).catch(() => null)
+  ]);
+  const matches = Boolean(actualTopLevel && expectedTopLevel)
+    && (process.platform === 'win32'
+      ? actualTopLevel.toLowerCase() === expectedTopLevel.toLowerCase()
+      : actualTopLevel === expectedTopLevel);
   if (!matches) {
     throw new SafetyError('invalid_repo', 'repoPath must point to the root of the Git worktree.');
   }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  assertSupportedRepository,
   isPathOutside,
   redactSecrets,
   resolveCommand,
@@ -167,6 +168,24 @@ test('detects parent and cross-drive path escapes', () => {
   } else {
     assert.equal(isPathOutside(root, '/etc/passwd'), true);
   }
+});
+
+test('accepts a directory link that resolves to the repository root', async (t) => {
+  const { root } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const aliasRoot = await mkdtemp(join(tmpdir(), 'patchtrace-alias-'));
+  t.after(() => rm(aliasRoot, { recursive: true, force: true }));
+  const alias = join(aliasRoot, 'repo');
+  try {
+    await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (process.platform === 'win32' && ['EACCES', 'EPERM', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`directory links are unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  await assert.doesNotReject(() => assertSupportedRepository(alias));
 });
 
 test('resolves and runs npm through the Windows command wrapper', async () => {
