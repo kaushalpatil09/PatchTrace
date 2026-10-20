@@ -1,0 +1,19 @@
+{
+  "name": "patchtrace",
+  "version": "0.1.0",
+  "description": "Local-first incident-to-change analyzer with inspectable evidence and opt-in rollback verification.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "patchtrace": "./bin/patchtrace.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "smoke": "node scripts/smoke.mjs",
+    "patchtrace": "node bin/patchtrace.mjs"
+  }
+}

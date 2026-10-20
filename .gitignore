@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Local environment overrides
+# .env.example is the committed template; real values stay local.
+.env
+.env.*
+!.env.example
+
+# Logs and debug output
+*.log
+npm-debug.log*
+*.pid
+
+# Test and coverage output
+coverage/
+.nyc_output/
+
+# Local caches and temporary files
+.cache/
+tmp/
+*.tmp
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local-only workflow files and internal notes
+.omnirush/
+.opencode/
+opencode.jsonc
+PATCHTRACE_SESSION_HANDOFF.md

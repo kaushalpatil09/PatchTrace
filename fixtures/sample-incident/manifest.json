@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "title": "VAT calculation errors after checkout deployment",
+  "summary": "Checkout began rejecting valid EU orders shortly after the latest deployment.",
+  "environment": "production",
+  "incidentStart": "2026-10-20T14:09:00Z",
+  "incidentFiles": ["src/tax.ts", "src/checkout.ts"],
+  "commits": [
+    {
+      "sha": "12fa0b1",
+      "timestamp": "2026-10-20T11:30:00Z",
+      "message": "Refactor checkout test helpers",
+      "changedFiles": ["tests/helpers/checkout-fixtures.ts"],
+      "diffRisk": 0.25,
+      "dependencyImpact": 0.05
+    },
+    {
+      "sha": "a81e7c2",
+      "timestamp": "2026-10-20T13:55:00Z",
+      "message": "Simplify VAT exemption calculation",
+      "changedFiles": ["src/tax.ts", "tests/vat.test.ts"],
+      "diffRisk": 0.88,
+      "dependencyImpact": 0.72
+    },
+    {
+      "sha": "4d921aa",
+      "timestamp": "2026-10-20T13:58:00Z",
+      "message": "Update checkout copy",
+      "changedFiles": ["src/copy.ts", "locales/en.json"],
+      "diffRisk": 0.10,
+      "dependencyImpact": 0.02
+    }
+  ],
+  "deployments": [
+    { "commitSha": "a81e7c2", "timestamp": "2026-10-20T14:00:00Z", "environment": "production" },
+    { "commitSha": "4d921aa", "timestamp": "2026-10-20T14:00:00Z", "environment": "production" }
+  ],
+  "tests": [
+    {
+      "name": "VAT-07",
+      "timestamp": "2026-10-20T14:10:00Z",
+      "status": "failed",
+      "relatedFiles": ["src/tax.ts", "tests/vat.test.ts"],
+      "errorSignature": "expected exempt order to have zero tax"
+    },
+    {
+      "name": "CHECKOUT-02",
+      "timestamp": "2026-10-20T14:10:00Z",
+      "status": "passed",
+      "relatedFiles": ["src/checkout.ts"]
+    }
+  ],
+  "incidentEvents": [
+    { "kind": "error_spike", "timestamp": "2026-10-20T14:09:00Z", "title": "VAT error rate increased", "detail": "EU checkout errors crossed the alert threshold." },
+    { "kind": "incident", "timestamp": "2026-10-20T14:13:00Z", "title": "Incident declared", "detail": "Checkout investigation started." }
+  ],
+  "verification": {
+    "a81e7c2": {
+      "message": "Reverting this candidate removes the reproduced VAT failure in the fixture workspace.",
+      "baseline": { "failed": 1, "passed": 42, "label": "VAT-07 fails" },
+      "candidate": { "failed": 0, "passed": 43, "label": "VAT-07 passes" }
+    }
+  }
+}

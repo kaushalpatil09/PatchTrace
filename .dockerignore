@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+npm-debug.log*
+.env
+.env.*
+!.env.example
+coverage
+docs
+tests
+PATCHTRACE_SESSION_HANDOFF.md
+README.md
+AGENTS.md
+TODO.md
+opencode.jsonc
+*.log

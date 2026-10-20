@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PatchTrace — incident evidence, not guesses</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand-mark">P</div>
+      <div>
+        <div class="eyebrow">LOCAL INCIDENT ANALYSIS</div>
+        <h1>PatchTrace</h1>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="offline-pill"><span></span> Offline-first</div>
+    </header>
+
+    <main class="shell">
+      <section class="hero panel">
+        <div>
+          <div class="eyebrow accent">INCIDENT → CHANGE</div>
+          <h2>Find the change worth investigating first.</h2>
+          <p>PatchTrace connects deployment timing, changed files, and failing tests into an inspectable suspect ranking. It is evidence, not a root-cause oracle.</p>
+        </div>
+        <div class="load-actions">
+          <button id="load-sample" class="primary-button">Load sample incident <span>↗</span></button>
+          <button id="load-bundle" class="secondary-button" type="button">Load incident bundle</button>
+          <input id="bundle-file" type="file" accept="application/json,.json" hidden>
+        </div>
+      </section>
+
+      <section id="status" class="status-bar" aria-live="polite">Ready. Load the deterministic sample to begin.</section>
+
+      <section id="workspace" class="workspace hidden">
+        <div class="main-column">
+          <section class="panel incident-panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">CURRENT INVESTIGATION</div>
+                <h3 id="incident-title">—</h3>
+              </div>
+              <div class="section-actions">
+                <div id="environment" class="tag">—</div>
+                <button id="download-analysis" class="small-button" type="button">Download JSON</button>
+              </div>
+            </div>
+            <p id="incident-summary" class="muted">—</p>
+            <p id="analysis-meta" class="analysis-meta">—</p>
+            <div id="timeline" class="timeline"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">RANKED EVIDENCE</div>
+                <h3>Suspect changes</h3>
+              </div>
+              <div class="muted small">Deterministic score · 0–1</div>
+            </div>
+            <div id="suspects" class="suspect-list"></div>
+          </section>
+        </div>
+
+        <aside class="side-column">
+          <section id="detail-panel" class="panel detail-panel">
+            <div class="eyebrow">SELECT A SUSPECT</div>
+            <h3>Evidence details</h3>
+            <p class="muted">Choose a ranked commit to inspect its supporting signals.</p>
+          </section>
+          <section id="verification-panel" class="panel verification-panel hidden" aria-live="polite" tabindex="-1"></section>
+        </aside>
+      </section>
+    </main>
+
+    <footer>PatchTrace prototype · local data only · no production actions</footer>
+    <noscript>PatchTrace requires JavaScript and the local server. No data leaves this machine.</noscript>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
