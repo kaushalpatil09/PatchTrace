@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="720" viewBox="0 0 1500 720" role="img" aria-labelledby="title desc">
+  <title id="title">PatchTrace investigation workflow</title>
+  <desc id="desc">A six-step workflow from local incident evidence through validation, enrichment, deterministic ranking, reporting, and optional rollback verification.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b0f14"/>
+      <stop offset="1" stop-color="#14232a"/>
+    </linearGradient>
+    <linearGradient id="step" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#182732"/>
+      <stop offset="1" stop-color="#101820"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#57d4c7"/>
+    </marker>
+    <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#ffbd69"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="720" rx="28" fill="url(#bg)"/>
+  <text x="70" y="72" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="34" font-weight="800">From incident bundle to inspectable hypothesis</text>
+  <text x="70" y="108" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="17">Every stage preserves provenance and exposes uncertainty instead of hiding missing evidence.</text>
+
+  <g transform="translate(70 178)">
+    <rect width="198" height="234" rx="18" fill="url(#step)" stroke="#334450" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#102522" stroke="#57d4c7" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">01</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Collect</text>
+    <text x="24" y="125" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">Bundle JSON</text>
+    <text x="24" y="149" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">Deployment CSV</text>
+    <text x="24" y="173" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">JUnit XML</text>
+    <text x="24" y="197" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">local files only</text>
+  </g>
+
+  <g transform="translate(310 178)">
+    <rect width="198" height="234" rx="18" fill="url(#step)" stroke="#334450" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#102522" stroke="#57d4c7" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">02</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Validate</text>
+    <text x="24" y="125" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">schemaVersion 1</text>
+    <text x="24" y="149" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">timezone-aware dates</text>
+    <text x="24" y="173" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">field-level errors</text>
+    <text x="24" y="197" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">reject before scoring</text>
+  </g>
+
+  <g transform="translate(550 178)">
+    <rect width="198" height="234" rx="18" fill="url(#step)" stroke="#334450" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#102522" stroke="#57d4c7" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">03</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Enrich</text>
+    <text x="24" y="125" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">local Git history</text>
+    <text x="24" y="149" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">changed files</text>
+    <text x="24" y="173" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">diff/dependency risk</text>
+    <text x="24" y="197" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">source stays untouched</text>
+  </g>
+
+  <g transform="translate(790 178)">
+    <rect width="198" height="234" rx="18" fill="url(#step)" stroke="#334450" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#102522" stroke="#57d4c7" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">04</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Rank</text>
+    <text x="24" y="125" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">timeline phases</text>
+    <text x="24" y="149" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">five weighted signals</text>
+    <text x="24" y="173" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">coverage + confidence</text>
+    <text x="24" y="197" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">evidence, not proof</text>
+  </g>
+
+  <g transform="translate(1030 178)">
+    <rect width="198" height="234" rx="18" fill="url(#step)" stroke="#334450" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#201e1a" stroke="#ffbd69" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">05</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Report</text>
+    <text x="24" y="125" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">JSON</text>
+    <text x="24" y="149" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">Markdown</text>
+    <text x="24" y="173" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">CSV ranking</text>
+    <text x="24" y="197" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">redaction + provenance</text>
+  </g>
+
+  <g transform="translate(1270 178)">
+    <rect width="198" height="234" rx="18" fill="#211f1a" stroke="#6c5737" stroke-width="2"/>
+    <circle cx="34" cy="38" r="19" fill="#30281d" stroke="#ffbd69" stroke-width="2"/>
+    <text x="34" y="45" text-anchor="middle" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="16" font-weight="800">06</text>
+    <text x="24" y="91" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="19" font-weight="800">Verify*</text>
+    <text x="24" y="125" fill="#c8b99f" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">baseline ×2</text>
+    <text x="24" y="149" fill="#c8b99f" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">revert in copy</text>
+    <text x="24" y="173" fill="#c8b99f" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">candidate test</text>
+    <text x="24" y="197" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="700">opt-in · bounded · local</text>
+  </g>
+
+  <path d="M268 295 H310" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M508 295 H550" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M748 295 H790" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M988 295 H1030" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M1228 295 H1270" fill="none" stroke="#ffbd69" stroke-width="3" marker-end="url(#arrowAmber)"/>
+
+  <g transform="translate(70 500)">
+    <rect width="1398" height="130" rx="18" fill="#111a21" stroke="#2c3b47"/>
+    <text x="28" y="38" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="800" letter-spacing="2">SAFETY CONTRACT</text>
+    <text x="28" y="75" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="17">Analysis never mutates the source repository. Real verification is disabled by default.</text>
+    <text x="28" y="101" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">* Temp-copy mode is best-effort isolation; production isolation requires a ready Docker/Podman runtime and local image.</text>
+  </g>
+</svg>

@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="860" viewBox="0 0 1500 860" role="img" aria-labelledby="title desc">
+  <title id="title">PatchTrace architecture diagram</title>
+  <desc id="desc">Browser UI and CLI feed a framework-independent Node.js core, which validates, enriches, scores, verifies, and exports local incident evidence.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b0f14"/>
+      <stop offset="1" stop-color="#15222a"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#183331"/>
+      <stop offset="1" stop-color="#10201f"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" x2="1">
+      <stop offset="0" stop-color="#2b2540"/>
+      <stop offset="1" stop-color="#1b1930"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#57d4c7"/>
+    </marker>
+    <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#ffbd69"/>
+    </marker>
+  </defs>
+
+  <rect width="1500" height="860" rx="28" fill="url(#bg)"/>
+  <text x="72" y="76" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="34" font-weight="800">PatchTrace architecture</text>
+  <text x="72" y="112" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="17">Thin local shells around a deterministic, framework-independent evidence engine.</text>
+
+  <g transform="translate(72 170)">
+    <rect width="300" height="170" rx="18" fill="#151f2a" stroke="#334450" stroke-width="2"/>
+    <rect x="22" y="22" width="54" height="54" rx="12" fill="#102522" stroke="#57d4c7" stroke-width="2"/>
+    <text x="49" y="58" text-anchor="middle" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="28" font-weight="800">UI</text>
+    <text x="94" y="49" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="800">Browser UI</text>
+    <text x="22" y="106" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">public/index.html</text>
+    <text x="22" y="130" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">public/app.js · public/styles.css</text>
+    <text x="22" y="154" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700">HTTP JSON + session token</text>
+  </g>
+
+  <g transform="translate(72 455)">
+    <rect width="300" height="170" rx="18" fill="#151f2a" stroke="#334450" stroke-width="2"/>
+    <rect x="22" y="22" width="54" height="54" rx="12" fill="#201e1a" stroke="#ffbd69" stroke-width="2"/>
+    <text x="49" y="58" text-anchor="middle" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="24" font-weight="800">CLI</text>
+    <text x="94" y="49" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="800">Command line</text>
+    <text x="22" y="106" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">bin/patchtrace.mjs</text>
+    <text x="22" y="130" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">local JSON / CSV / XML files</text>
+    <text x="22" y="154" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700">argv arrays · stable exit codes</text>
+  </g>
+
+  <g transform="translate(488 242)">
+    <rect width="510" height="360" rx="22" fill="url(#core)" stroke="#57d4c7" stroke-width="2"/>
+    <text x="34" y="46" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12" font-weight="800" letter-spacing="2">FRAMEWORK-INDEPENDENT CORE</text>
+    <text x="34" y="84" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="28" font-weight="800">src/core/</text>
+    <g transform="translate(34 118)">
+      <rect width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="16" y="28" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">analysis.mjs</text>
+      <text x="16" y="51" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">validation · timeline · scoring</text>
+      <rect x="232" width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="248" y="28" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">git-adapter.mjs</text>
+      <text x="248" y="51" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">history · changed files · risk</text>
+      <rect y="86" width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="16" y="114" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">ingestion.mjs</text>
+      <text x="16" y="137" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">CSV · JUnit · provenance</text>
+      <rect x="232" y="86" width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="248" y="114" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">report.mjs</text>
+      <text x="248" y="137" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">JSON · Markdown · CSV</text>
+      <rect y="172" width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="16" y="200" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">verification.mjs</text>
+      <text x="16" y="223" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">temp-copy · timeouts · cleanup</text>
+      <rect x="232" y="172" width="210" height="70" rx="12" fill="#152b2b" stroke="#315c5d"/>
+      <text x="248" y="200" fill="#edf4f8" font-family="ui-monospace,monospace" font-size="14" font-weight="800">redaction.mjs</text>
+      <text x="248" y="223" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="12">secrets · path scrubbing</text>
+    </g>
+  </g>
+
+  <g transform="translate(1085 170)">
+    <rect width="340" height="170" rx="18" fill="#151f2a" stroke="#334450" stroke-width="2"/>
+    <text x="24" y="40" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="800">Local HTTP server</text>
+    <text x="24" y="75" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">server.mjs</text>
+    <text x="24" y="101" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">loopback by default</text>
+    <text x="24" y="127" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">security headers · body limits</text>
+    <text x="24" y="151" fill="#57d4c7" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700">GET /api/health</text>
+  </g>
+
+  <g transform="translate(1085 455)">
+    <rect width="340" height="170" rx="18" fill="url(#violet)" stroke="#6a5a8d" stroke-width="2"/>
+    <text x="24" y="40" fill="#edf4f8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="21" font-weight="800">Optional isolation path</text>
+    <text x="24" y="75" fill="#c9bdf0" font-family="ui-monospace,monospace" font-size="14">container-runner.mjs</text>
+    <text x="24" y="102" fill="#aaa0c8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">Docker/Podman · no network</text>
+    <text x="24" y="128" fill="#aaa0c8" font-family="ui-sans-serif,system-ui,sans-serif" font-size="14">read-only source · non-root</text>
+    <text x="24" y="152" fill="#ffbd69" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" font-weight="700">fails closed when unavailable</text>
+  </g>
+
+  <path d="M372 255 C420 255 432 330 488 330" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M372 540 C420 540 432 510 488 510" fill="none" stroke="#ffbd69" stroke-width="3" marker-end="url(#arrowAmber)"/>
+  <path d="M998 330 C1040 330 1046 255 1085 255" fill="none" stroke="#57d4c7" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M998 510 C1040 510 1046 540 1085 540" fill="none" stroke="#ffbd69" stroke-width="3" marker-end="url(#arrowAmber)"/>
+
+  <text x="72" y="765" fill="#8ea0ad" font-family="ui-sans-serif,system-ui,sans-serif" font-size="15">No database. No external service calls. Incident bundles, provenance, and reports remain local files.</text>
+  <text x="72" y="795" fill="#62717c" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13">The source repository is read for enrichment and never used as the working directory for verification.</text>
+</svg>
