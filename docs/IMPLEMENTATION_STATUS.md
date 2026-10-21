@@ -40,7 +40,7 @@ Last updated: 2026-10-21
 - Real-verification form in the UI when the server enables it.
 - Fixture verification remains clearly labeled as stored demo evidence.
 - API, security, privacy, contribution, changelog, and root security-policy references.
-- GitHub Actions CI matrix on Ubuntu and Windows with Node 22 and 24 (install, tests, smoke, doctor).
+- GitHub Actions CI matrix on Ubuntu and Windows with Node 22 and 24 (install, tests, smoke, doctor), plus an Ubuntu Docker image build/start/health/non-root gate.
 - Local `patchtrace ingest` command for merging bundle overrides, deployment CSV, JUnit XML, and Git enrichment, with artifact hashes/parser provenance.
 - Report/API evidence references, stricter report request validation, and server-owned fixture verification.
 
@@ -48,15 +48,13 @@ Last updated: 2026-10-21
 
 ### Before calling this production-ready
 
-- **Live container/VM operational validation** for verification. The constrained Docker/Podman runner and fail-closed result contract are implemented; a real daemon/image run and a dedicated VM audit remain deployment gates.
+- **Live verification-mode container/VM validation.** The constrained Docker/Podman runner and fail-closed result contract are implemented and unit-tested, and the app image build/start/health gate passes in CI. Running candidate tests inside the container against a real daemon and a dedicated VM audit remain deployment gates.
 - **Generated API schema tooling** beyond the dependency-free hand-written route contracts. OpenAPI 3.1 is checked in at `docs/openapi.yaml` and route-level docs exist in `docs/API.md`.
 - **Full source-level package-graph analysis** remains deferred. Current Git enrichment derives a transparent dependency-impact heuristic from supported manifests/lockfiles and bounded diff churn; explicit values remain labeled as provided.
-- **CI matrix execution/validation** on real GitHub runners. The workflow is checked in, but this environment cannot execute GitHub Actions.
 - **Large-repository and slow-command performance tests.** A synthetic bundle at the documented collection limits is covered; repository copying/enrichment at scale is not.
 - **Persistence and investigation history** are intentionally not implemented; JSON bundles/reports are the current contract.
 - **Path scrubbing in raw analysis responses.** Report JSON, Markdown, and CSV scrub absolute local paths while preserving repository-relative evidence. Raw `/api/analyze` responses remain sensitive data.
 - **Accessibility audit** with a browser/AT; the static baseline and keyboard/zoom semantics are in place, but this needs real assistive-technology testing.
-- **Docker build/runtime validation.** Docker is unavailable in this environment; the Ubuntu CI job is the executable build/runtime gate.
 
 ### Deliberately out of scope for the first version
 

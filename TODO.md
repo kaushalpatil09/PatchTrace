@@ -49,11 +49,11 @@ See `docs/IMPLEMENTATION_STATUS.md` for what is verified and `docs/PRODUCTION_RE
 - [x] Add a constrained Docker/Podman verification runner behind the same result contract; live daemon/VM validation remains a release gate.
 - [x] Add hand-written API request/response contracts and OpenAPI 3.1 documentation.
 - [x] Add dependency-impact derivation from supported manifests/lockfiles and bounded diff churn (full source-level package graph remains deferred).
-- [ ] Execute and validate the CI matrix, including the Docker job, on real runners.
+- [x] Execute and validate the CI matrix, including the Docker job, on GitHub-hosted Ubuntu and Windows runners.
 - [x] Add repository-copy, free-space, Git-history, parser, and output bounds; large-repository benchmarking remains a release gate.
 - [x] Add path-scrubbing policy for report metadata.
 - [ ] Browser accessibility audit with assistive technology.
-- [ ] Build and validate the Docker image locally or through a completed CI run.
+- [x] Build and validate the Docker image through the completed CI run.
 
 ## Deliberately deferred
 
