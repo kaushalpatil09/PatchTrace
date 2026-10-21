@@ -52,25 +52,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          container_id="$(docker run -d --rm --name patchtrace-ci -p 127.0.0.1:4173:4173 patchtrace:ci)"
+          container_id="$(docker run -d --rm --name patchtrace-ci \
+            --health-interval=5s \
+            --health-start-period=5s \
+            --health-retries=3 \
+            -p 127.0.0.1:4173:4173 \
+            patchtrace:ci)"
           cleanup() {
             docker rm -f "$container_id" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
 
-          for attempt in $(seq 1 30); do
+          ready=false
+          for attempt in $(seq 1 60); do
             state="$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true)"
-            if [[ "$state" == "running" ]]; then
+            if [[ "$state" != "running" ]]; then
+              if [[ "$state" == "exited" || "$state" == "dead" || -z "$state" ]]; then
+                echo "Container is not running (state: ${state:-missing})."
+                docker logs "$container_id" || true
+                exit 1
+              fi
+            elif curl --fail --silent --max-time 2 http://127.0.0.1:4173/api/health 2>/dev/null \
+              | grep -q '"ready":true'; then
+              ready=true
               break
-            fi
-            if [[ "$state" == "exited" || "$state" == "dead" || -z "$state" ]]; then
-              docker logs "$container_id" || true
-              exit 1
             fi
             sleep 1
           done
+          if [[ "$ready" != "true" ]]; then
+            echo "Container did not become API-ready."
+            docker logs "$container_id" || true
+            exit 1
+          fi
 
-          curl --fail --retry 10 --retry-delay 1 http://127.0.0.1:4173/api/health
           health=""
           for attempt in $(seq 1 30); do
             health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"

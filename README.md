@@ -464,10 +464,22 @@ The Dockerfile uses a dependency stage and a small runtime stage. The runtime in
 For a local release gate, run the same checks explicitly:
 
 ```bash
+set -euo pipefail
 docker build -t patchtrace:local .
-container_id="$(docker run -d --rm --name patchtrace-local -p 127.0.0.1:4173:4173 patchtrace:local)"
+container_id="$(docker run -d --rm --name patchtrace-local \
+  --health-interval=5s --health-start-period=5s \
+  -p 127.0.0.1:4173:4173 patchtrace:local)"
 trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
-curl --fail --retry 10 --retry-delay 1 http://127.0.0.1:4173/api/health
+ready=false
+for attempt in $(seq 1 60); do
+  if curl --fail --silent --max-time 2 http://127.0.0.1:4173/api/health 2>/dev/null \
+    | grep -q '"ready":true'; then
+    ready=true
+    break
+  fi
+  sleep 1
+done
+test "$ready" = true
 health=""
 for attempt in $(seq 1 30); do
   health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
