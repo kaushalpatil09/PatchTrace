@@ -48,7 +48,7 @@ Last updated: 2026-10-21
 
 ### Before calling this production-ready
 
-- **Live verification-mode container/VM validation.** The constrained Docker/Podman runner and fail-closed result contract are implemented and unit-tested, and the app image build/start/health gate passes in CI. Running candidate tests inside the container against a real daemon and a dedicated VM audit remain deployment gates.
+- **Live verification-mode container/VM validation.** The constrained runner passes an end-to-end Docker verification on Windows, including a CRLF worktree with a failing candidate that reverted and passed inside the container. A dedicated VM audit and Linux/Podman coverage remain deployment gates.
 - **Generated API schema tooling** beyond the dependency-free hand-written route contracts. OpenAPI 3.1 is checked in at `docs/openapi.yaml` and route-level docs exist in `docs/API.md`.
 - **Full source-level package-graph analysis** remains deferred. Current Git enrichment derives a transparent dependency-impact heuristic from supported manifests/lockfiles and bounded diff churn; explicit values remain labeled as provided.
 - **Large-repository and slow-command performance tests.** A synthetic bundle at the documented collection limits is covered; repository copying/enrichment at scale is not.

@@ -4,7 +4,7 @@
 **Target:** PatchTrace 1.0 — local-first, single-user incident analysis  
 **Last updated:** 2026-10-21
 
-> **Current implementation:** M0 safety controls and a substantial M1 vertical slice are implemented and tested. The constrained container runner, hand-written API contracts and OpenAPI document, dependency-impact heuristic, release metadata, Docker CI job, and resource limits are in place. Remaining blockers are live Docker/VM validation, full package-graph analysis, assistive-technology review, and executing the release gates. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the verified checklist.
+> **Current implementation:** M0 safety controls and a substantial M1 vertical slice are implemented and tested. The constrained container runner, hand-written API contracts and OpenAPI document, dependency-impact heuristic, release metadata, Docker CI job, and resource limits are in place; live Docker verification passes on Windows. Remaining blockers are dedicated-VM validation, full package-graph analysis, assistive-technology review, and executing the release gates. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the verified checklist.
 
 ---
 

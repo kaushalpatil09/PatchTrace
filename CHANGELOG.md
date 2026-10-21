@@ -29,6 +29,10 @@
 - Worktrees, submodules, bare/shallow repositories, filesystem roots, dirty worktrees, and escaping symlinks are rejected before verification.
 - Verification output and report JSON are redacted best-effort. Raw analysis API responses remain sensitive data; report exports scrub absolute local paths while preserving repository-relative evidence paths.
 
+### Fixed
+
+- Container-mode verification now uses line-ending- and file-mode-safe Git settings for bind-mounted Windows worktrees, preventing false local-change conflicts during candidate reverts.
+
 ### Known limitations
 
 - Default real verification uses temporary-copy isolation; production mode requires the constrained Docker/Podman runner, while a dedicated VM remains a stronger boundary.

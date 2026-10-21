@@ -692,13 +692,14 @@ The following commands were run successfully in this checkout on **October 21, 2
 | --- | --- |
 | `npm test` | 102 tests, 0 failed; 1 Windows-only symlink test skipped. |
 | `npm run smoke` | Auth, sample API, analysis, fixture verification, and redacted report export reported available. |
-| `npm run doctor -- --json` | Local readiness `ok: true`; Node `24.13.0`, Git `2.52.0`; container runtime/image unavailable. |
+| `npm run doctor -- --strict-container` | Node, Git, temporary workspace, Docker `29.8.2`, and `patchtrace:local` all reported ready. |
 | `npm run security` | `npm audit --omit=dev --audit-level=high` reported 0 vulnerabilities. |
 | `npm run test:ui` | 6 UI static/accessibility checks passed. |
 | `npm run test:cli` | 7 CLI checks passed. |
 | `npm run check` | Test, smoke, and doctor gates completed successfully. |
+| Production-isolation verification | Docker `29.8.2` + `patchtrace:local`; baseline failed, the candidate reverted in the isolated workspace, and the candidate phase passed. |
 
-The doctor output also reported that Docker/Podman was unavailable in this workspace. Therefore `productionReady` was `false`; this does not prevent local analysis, but it does prevent a local production-isolation verification run.
+After Docker was enabled, the strict doctor gate reported all checks ready. A synthetic repository with a failing candidate was also verified through the production container runner on Windows.
 
 ## Troubleshooting
 
@@ -748,7 +749,7 @@ The following are verified limitations or deliberate scope boundaries, not hidde
 - There is no persistence, investigation history, account system, multi-user mode, upload service, or rate limiter.
 - The HTTP server is intended for one local operator and is not designed for direct internet exposure.
 - Report redaction is pattern-based and best-effort. Raw analysis responses remain sensitive, and repository-relative evidence can still disclose private context.
-- The current repository does not claim a coverage percentage or live Docker/VM verification result without running and reviewing those checks in the target environment.
+- The current repository does not claim a coverage percentage or dedicated-VM verification result without running and reviewing those checks in the target environment.
 - No code path performs a production rollback or writes to a production system.
 
 ## Future improvements

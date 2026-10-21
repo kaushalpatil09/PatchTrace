@@ -535,6 +535,14 @@ test('runs every production verification phase through a constrained container c
     assert.ok(command.some((part) => part.endsWith(':/patchtrace/source:ro')));
     assert.ok(command.some((part) => part.endsWith(':/patchtrace/workspace:rw')));
   }
+
+  const gitCalls = runCalls.filter((command) => command.includes('git'));
+  assert.ok(gitCalls.length > 0);
+  for (const command of gitCalls) {
+    assert.ok(command.includes('safe.directory=/patchtrace/workspace'));
+    assert.ok(command.includes('core.autocrlf=input'));
+    assert.ok(command.includes('core.fileMode=false'));
+  }
 });
 
 test('rejects an oversized repository before creating a verification workspace', async (t) => {

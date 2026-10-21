@@ -857,7 +857,15 @@ export async function verifyRollback({
         'git',
         '-c', 'core.hooksPath=',
         '-c', 'core.fsmonitor=false',
-        ...(isolation === 'container' ? ['-c', 'safe.directory=/patchtrace/workspace'] : []),
+        ...(isolation === 'container'
+          ? [
+              '-c', 'safe.directory=/patchtrace/workspace',
+              // Bind-mounted Windows worktrees may keep CRLF line endings and
+              // report mode differences even though the Git index is clean.
+              '-c', 'core.autocrlf=input',
+              '-c', 'core.fileMode=false'
+            ]
+          : []),
         ...args
       ],
       workspace,
