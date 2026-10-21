@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "title": "Discount cap regression after pricing deployment",
+  "summary": "Coupons above $100 stopped reducing order totals after the 10:05 pricing release.",
+  "environment": "production",
+  "incidentStart": "2026-10-21T10:24:00Z",
+  "incidentEnd": "2026-10-21T11:10:00Z",
+  "candidateWindowMinutes": 180,
+  "incidentFiles": ["src/pricing/discounts.ts", "tests/discounts.test.ts"],
+  "commits": [
+    {
+      "sha": "1a2b3c4",
+      "timestamp": "2026-10-21T08:05:00Z",
+      "message": "Add warehouse routing note",
+      "changedFiles": ["docs/warehouse.md"],
+      "diffRisk": 0.05,
+      "dependencyImpact": 0.01
+    },
+    {
+      "sha": "9f8e7d6",
+      "timestamp": "2026-10-21T09:42:00Z",
+      "message": "Refactor discount cap calculation",
+      "changedFiles": ["src/pricing/discounts.ts", "tests/discounts.test.ts"],
+      "diffRisk": 0.82,
+      "dependencyImpact": 0.12
+    },
+    {
+      "sha": "5c4b3a2",
+      "timestamp": "2026-10-21T09:58:00Z",
+      "message": "Tune checkout telemetry sampling",
+      "changedFiles": ["src/telemetry.ts"],
+      "diffRisk": 0.18,
+      "dependencyImpact": 0.03
+    }
+  ],
+  "deployments": [
+    {
+      "commitSha": "9f8e7d6",
+      "timestamp": "2026-10-21T10:05:00Z",
+      "environment": "production"
+    },
+    {
+      "commitSha": "5c4b3a2",
+      "timestamp": "2026-10-21T10:05:00Z",
+      "environment": "production"
+    }
+  ],
+  "tests": [
+    {
+      "name": "DISCOUNT-CAP-01",
+      "timestamp": "2026-10-21T10:25:00Z",
+      "status": "failed",
+      "relatedFiles": ["src/pricing/discounts.ts", "tests/discounts.test.ts"],
+      "errorSignature": "expected 15% coupon to reduce 120.00 to 102.00, got 120.00"
+    },
+    {
+      "name": "DISCOUNT-ROUNDING-02",
+      "timestamp": "2026-10-21T10:25:00Z",
+      "status": "passed",
+      "relatedFiles": ["src/pricing/discounts.ts"]
+    }
+  ],
+  "incidentEvents": [
+    {
+      "kind": "error_spike",
+      "timestamp": "2026-10-21T10:24:00Z",
+      "title": "Discount complaints spike",
+      "detail": "Support tickets about missing coupon discounts crossed the alert threshold."
+    },
+    {
+      "kind": "incident",
+      "timestamp": "2026-10-21T10:30:00Z",
+      "title": "Incident declared",
+      "detail": "Checkout and pricing owners started investigating the 10:05 release."
+    },
+    {
+      "kind": "operator_note",
+      "timestamp": "2026-10-21T10:38:00Z",
+      "title": "Suspect release identified",
+      "detail": "The discount cap refactor is the only pricing change in the release window."
+    }
+  ]
+}
