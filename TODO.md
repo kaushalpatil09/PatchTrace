@@ -38,18 +38,22 @@ See `docs/IMPLEMENTATION_STATUS.md` for what is verified and `docs/PRODUCTION_RE
 - [x] Record ingestion artifact hashes, parser versions, source paths, and ingestion time.
 - [x] Add bounded why-not explanations and evidence source references.
 - [x] Add stricter report request validation and safe repository error mapping.
+- [x] Add public npm metadata, MIT license text, curated package files, and release notes.
+- [x] Add multi-stage non-root Docker packaging, healthcheck guidance, and an Ubuntu Docker build/runtime CI job.
+- [x] Add local `doctor`, security, coverage-compatible, focused, and release-check npm scripts.
+- [x] Add accessible landmarks, labels, live regions, focus/keyboard behavior, responsive zoom semantics, reduced-motion/contrast fallbacks, and static UI regressions.
+- [x] Document operational limits, resource budgets, readiness semantics, Docker resources, and release validation.
 
 ## Next: production hardening
 
-- [ ] Container/VM verification runner behind the same result contract.
-- [ ] Complete API request/response schema validation and OpenAPI documentation (the report request contract is now validated; route docs exist).
-- [ ] Dependency blast-radius derivation from a package graph.
-- [ ] Execute and validate the CI matrix on real runners.
-- [ ] Large-repository and slow-command limit tests (the maximum bundle size is covered).
-- [ ] Path-scrubbing policy for report metadata.
-- [ ] Browser accessibility audit.
-- [ ] License and release metadata.
-- [ ] Build and validate the Docker image.
+- [x] Add a constrained Docker/Podman verification runner behind the same result contract; live daemon/VM validation remains a release gate.
+- [x] Add hand-written API request/response contracts and OpenAPI 3.1 documentation.
+- [x] Add dependency-impact derivation from supported manifests/lockfiles and bounded diff churn (full source-level package graph remains deferred).
+- [ ] Execute and validate the CI matrix, including the Docker job, on real runners.
+- [x] Add repository-copy, free-space, Git-history, parser, and output bounds; large-repository benchmarking remains a release gate.
+- [x] Add path-scrubbing policy for report metadata.
+- [ ] Browser accessibility audit with assistive technology.
+- [ ] Build and validate the Docker image locally or through a completed CI run.
 
 ## Deliberately deferred
 

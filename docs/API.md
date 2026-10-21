@@ -152,13 +152,15 @@ Only available when the server starts with `PATCHTRACE_ENABLE_VERIFY=1`.
 
 `repoPath` must be a normal Git worktree root with no uncommitted or untracked changes. Linked worktrees, submodule checkouts, bare/shallow repositories, filesystem roots, dirty worktrees, and symlinks escaping the root are rejected. `sha` must be 4–64 hex characters. `testCommand` is an argv array; it is never passed through a shell. Empty arguments and null bytes are rejected. `timeoutMs` is a per-command limit from 1–600000, default `30000`. The overall test budget is `timeoutMs × (baseline runs + 1) + 10 seconds` (100 seconds with defaults), so a sequence of commands cannot hang indefinitely. `mainline` is a positive integer, default `1`.
 
+Verification uses `PATCHTRACE_VERIFY_ISOLATION=temp-copy` by default. Set it to `production` to require the constrained Docker/Podman runner and a pre-built local image; unavailable runtime, image, or resource budgets return `unsupported` rather than falling back silently.
+
 Only one real verification can run at a time. A concurrent request receives `409` with `error.code = "verification_in_progress"`.
 
 The baseline command runs twice by default. If the runs disagree on pass/fail, the result is `inconclusive` with `reason = "flaky_baseline"`; the candidate revert is not tested.
 
 Result fields:
 
-- `status`: `passed`, `failed`, `timeout`, `cancelled`, `missing_history`, or `unsupported_layout`.
+- `status`: `passed`, `failed`, `timeout`, `cancelled`, `missing_history`, `unsupported_layout`, or `unsupported`.
 - `source`: `fixture` for server-owned demo evidence or `live` for a real repository run.
 - `outcome`: `confirmed`, `not_confirmed`, `inconclusive`, `timeout`, `cancelled`, `invalid_repo`, `source_changed`, or `command_error`.
 - `reason` and `message`. A dirty worktree returns `reason = "dirty_worktree"` and `outcome = "invalid_repo"` before any copy or command.
@@ -167,10 +169,10 @@ Result fields:
 - `revert`: Git revert status and output, or `null` if it was not attempted.
 - `sourceUnchanged`: whether the source HEAD/status/config fingerprint still matches.
 - `cleanup`: whether the temporary workspace was removed. `{ removed: false, skipped: true }` means no workspace was created.
-- `isolation`, `platform`, `testCommand`, `timeoutMs`, `overallBudgetMs`, `baselineRunsRequested`, `startedAt`, `finishedAt`, and `durationMs`: audit fields.
+- `isolation`, `isolationRequested`, `platform`, `testCommand`, `timeoutMs`, `overallBudgetMs`, `baselineRunsRequested`, `startedAt`, `finishedAt`, and `durationMs`: audit fields. Container mode also reports `containerRuntime`, `containerImage`, `repositoryBytes`, and `freeSpaceBytes`.
 - Command `stdout`/`stderr` are capped at 256 KB per stream, marked when truncated, and best-effort redacted for private keys, common token formats, bearer tokens, JWTs, URL credentials, and `password`/`token`/`secret` assignments. `redactions` records how many matches were removed. Redaction is not a guarantee; do not print secrets deliberately.
 
-A confirmed result means the candidate revert changed the test outcome in the temporary copy. It is evidence, not proof of root cause. The runner is best-effort isolation, not a sandbox.
+A confirmed result means the candidate revert changed the test outcome in the temporary copy or constrained container workspace. It is evidence, not proof of root cause. `temp-copy` is best-effort isolation, not a sandbox; production container mode is a stronger boundary but still depends on a trusted runtime, image, and host.
 
 #### `POST /api/verify/cancel`
 

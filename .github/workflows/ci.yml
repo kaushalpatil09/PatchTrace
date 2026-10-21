@@ -33,3 +33,55 @@ jobs:
         run: npm run smoke
       - name: Doctor
         run: node bin/patchtrace.mjs doctor --json
+      - name: Security audit
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run security
+
+  docker:
+    name: Docker build / runtime (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --tag patchtrace:ci .
+      - name: Start container and verify readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker run -d --rm --name patchtrace-ci -p 127.0.0.1:4173:4173 patchtrace:ci)"
+          cleanup() {
+            docker rm -f "$container_id" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 30); do
+            state="$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true)"
+            if [[ "$state" == "running" ]]; then
+              break
+            fi
+            if [[ "$state" == "exited" || "$state" == "dead" || -z "$state" ]]; then
+              docker logs "$container_id" || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          curl --fail --retry 10 --retry-delay 1 http://127.0.0.1:4173/api/health
+          health=""
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
+            if [[ "$health" == "healthy" ]]; then
+              break
+            fi
+            if [[ "$health" == "unhealthy" ]]; then
+              docker logs "$container_id" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$health" = healthy
+          test "$(docker exec "$container_id" id -u)" != 0

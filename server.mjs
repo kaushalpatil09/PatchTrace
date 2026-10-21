@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { analyzeIncident, validateIncident, verifyFixture } from './src/core/analysis.mjs';
 import { buildReport } from './src/core/report.mjs';
+import { PATH_REPLACEMENT, scrubPathText } from './src/core/redaction.mjs';
 import { runCommand, sweepStaleWorkspaces, verifyRollback } from './src/core/verification.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -14,6 +15,7 @@ const publicDir = join(root, 'public');
 const fixturePath = join(root, 'fixtures', 'sample-incident', 'manifest.json');
 const packagePath = join(root, 'package.json');
 const COOKIE_NAME = 'patchtrace_session';
+const API_VERSION = 1;
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const toolVersionPromise = readFile(packagePath, 'utf8')
@@ -39,8 +41,212 @@ const securityHeaders = {
   'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
 };
 
+function isObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function addContractError(errors, path, message) {
+  errors.push({ path, message });
+}
+
+function validateAnalysisShape(value, prefix = 'analysis', { output = false } = {}) {
+  const errors = [];
+  if (!isObject(value)) {
+    addContractError(errors, prefix, `${prefix} must be an object.`);
+    return errors;
+  }
+  if (value.schemaVersion !== 1) addContractError(errors, `${prefix}.schemaVersion`, `${prefix}.schemaVersion must be 1.`);
+  if (!isObject(value.incident)) {
+    addContractError(errors, `${prefix}.incident`, `${prefix}.incident must be an object.`);
+  } else {
+    for (const field of ['title', 'environment', 'incidentStart']) {
+      if (typeof value.incident[field] !== 'string' || !value.incident[field].trim()) {
+        addContractError(errors, `${prefix}.incident.${field}`, `${field} is required.`);
+      }
+    }
+  }
+  if (!Array.isArray(value.suspects)) addContractError(errors, `${prefix}.suspects`, `${prefix}.suspects must be an array.`);
+  if (!Array.isArray(value.timeline)) addContractError(errors, `${prefix}.timeline`, `${prefix}.timeline must be an array.`);
+  if (!Number.isFinite(value.candidateWindowMinutes) || value.candidateWindowMinutes <= 0) {
+    addContractError(errors, `${prefix}.candidateWindowMinutes`, 'candidateWindowMinutes must be a positive number.');
+  }
+  if (output) {
+    if (!isObject(value.weights)) addContractError(errors, `${prefix}.weights`, `${prefix}.weights must be an object.`);
+    if (!Array.isArray(value.warnings)) addContractError(errors, `${prefix}.warnings`, `${prefix}.warnings must be an array.`);
+    if (!Number.isSafeInteger(value.excludedCandidateCount) || value.excludedCandidateCount < 0) {
+      addContractError(errors, `${prefix}.excludedCandidateCount`, 'excludedCandidateCount must be a non-negative integer.');
+    }
+    if (!isObject(value.verification)) addContractError(errors, `${prefix}.verification`, `${prefix}.verification must be an object.`);
+  }
+  return errors;
+}
+
+function validateVerifyRequest(body) {
+  const errors = [];
+  if (!isObject(body)) {
+    addContractError(errors, '', 'Verification request must be a JSON object.');
+    return errors;
+  }
+  if (typeof body.sha !== 'string' || !/^[0-9a-f]{4,64}$/i.test(body.sha)) {
+    addContractError(errors, 'sha', 'sha must be a Git commit SHA.');
+  }
+
+  if (body.repoPath !== undefined) {
+    if (typeof body.repoPath !== 'string' || !body.repoPath.trim()) {
+      addContractError(errors, 'repoPath', 'repoPath must be a non-empty string.');
+    }
+    if (body.testCommand !== undefined
+      && (!Array.isArray(body.testCommand) || !body.testCommand.length
+        || body.testCommand.some((part) => typeof part !== 'string' || !part || part.includes('\0')))) {
+      addContractError(errors, 'testCommand', 'testCommand must be a non-empty argv array of strings without empty or null-containing arguments.');
+    }
+    if (body.timeoutMs !== undefined
+      && (!Number.isFinite(body.timeoutMs) || body.timeoutMs < 1 || body.timeoutMs > 600_000)) {
+      addContractError(errors, 'timeoutMs', 'timeoutMs must be between 1 and 600000.');
+    }
+    if (body.mainline !== undefined && (!Number.isInteger(body.mainline) || body.mainline < 1)) {
+      addContractError(errors, 'mainline', 'mainline must be a positive integer.');
+    }
+  } else {
+    if (!isObject(body.analysis)) addContractError(errors, 'analysis', 'Fixture verification requires analysis and sha.');
+  }
+  return errors;
+}
+
+function validateCancelRequest(body) {
+  if (body === undefined || body === null) return [];
+  return isObject(body) ? [] : [{ path: '', message: 'Cancellation request must be a JSON object.' }];
+}
+
+function validateHealthResponse(value) {
+  const errors = [];
+  if (!isObject(value)) return [{ path: '', message: 'Health response must be an object.' }];
+  if (!['ok', 'degraded'].includes(value.status)) addContractError(errors, 'status', 'status must be ok or degraded.');
+  for (const field of ['ready', 'tempWritable', 'realVerificationEnabled', 'verificationInProgress']) {
+    if (typeof value[field] !== 'boolean') addContractError(errors, field, `${field} must be a boolean.`);
+  }
+  for (const field of ['version', 'node', 'platform']) {
+    if (typeof value[field] !== 'string' || !value[field]) addContractError(errors, field, `${field} must be a non-empty string.`);
+  }
+  if (!isObject(value.git)) {
+    addContractError(errors, 'git', 'git must be an object.');
+  } else {
+    if (typeof value.git.available !== 'boolean') addContractError(errors, 'git.available', 'git.available must be a boolean.');
+    if (value.git.version !== null && typeof value.git.version !== 'string') {
+      addContractError(errors, 'git.version', 'git.version must be a string or null.');
+    }
+  }
+  return errors;
+}
+
+function validateVerificationResponse(value) {
+  const errors = [];
+  if (!isObject(value)) return [{ path: '', message: 'Verification response must be an object.' }];
+  if (typeof value.status !== 'string' || !value.status) addContractError(errors, 'status', 'status must be a non-empty string.');
+  if (value.outcome !== undefined && (typeof value.outcome !== 'string' || !value.outcome)) {
+    addContractError(errors, 'outcome', 'outcome must be a non-empty string when present.');
+  }
+  if (!['fixture', 'live'].includes(value.source)) addContractError(errors, 'source', 'source must be fixture or live.');
+  return errors;
+}
+
+function validateReportResponse(value) {
+  const errors = [];
+  if (!isObject(value)) return [{ path: '', message: 'Report response must be an object.' }];
+  if (value.schemaVersion !== 1) addContractError(errors, 'schemaVersion', 'schemaVersion must be 1.');
+  if (typeof value.generatedAt !== 'string' || !value.generatedAt) addContractError(errors, 'generatedAt', 'generatedAt must be a non-empty string.');
+  if (typeof value.toolVersion !== 'string' || !value.toolVersion) addContractError(errors, 'toolVersion', 'toolVersion must be a non-empty string.');
+  errors.push(...validateAnalysisShape(value.analysis, 'analysis', { output: true }));
+  if (value.verification !== null && !isObject(value.verification)) addContractError(errors, 'verification', 'verification must be an object or null.');
+  if (!isObject(value.provenance)) addContractError(errors, 'provenance', 'provenance must be an object.');
+  if (!isObject(value.redaction)) {
+    addContractError(errors, 'redaction', 'redaction must be an object.');
+  } else {
+    if (value.redaction.applied !== true) addContractError(errors, 'redaction.applied', 'redaction.applied must be true.');
+    if (!Number.isSafeInteger(value.redaction.matches) || value.redaction.matches < 0) {
+      addContractError(errors, 'redaction.matches', 'redaction.matches must be a non-negative integer.');
+    }
+    if (value.redaction.pathsScrubbed !== undefined
+      && (!Number.isSafeInteger(value.redaction.pathsScrubbed) || value.redaction.pathsScrubbed < 0)) {
+      addContractError(errors, 'redaction.pathsScrubbed', 'redaction.pathsScrubbed must be a non-negative integer.');
+    }
+  }
+  return errors;
+}
+
+function validateSampleResponse(value) {
+  return validateIncident(value).errors;
+}
+
+function validateApiResponse(route, value) {
+  switch (route) {
+    case 'health': return validateHealthResponse(value);
+    case 'sample': return validateSampleResponse(value);
+    case 'analyze': return validateAnalysisShape(value, '', { output: true });
+    case 'report': return validateReportResponse(value);
+    case 'verify': return validateVerificationResponse(value);
+    case 'cancel':
+      return isObject(value) && value.cancelled === true
+        ? []
+        : [{ path: 'cancelled', message: 'cancelled must be true.' }];
+    default: return [{ path: '', message: `Unknown API response contract: ${route}.` }];
+  }
+}
+
+export function validateApiRequest(route, body) {
+  let errors;
+  switch (route) {
+    case 'analyze':
+      errors = validateIncident(body).errors;
+      break;
+    case 'report':
+      errors = validateReportRequest(body);
+      break;
+    case 'verify':
+      errors = validateVerifyRequest(body);
+      break;
+    case 'cancel':
+      errors = validateCancelRequest(body);
+      break;
+    default:
+      errors = [{ path: '', message: `Unknown API request contract: ${route}.` }];
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export { validateApiResponse };
+
+const ERROR_PATH_PATTERN = /(^|[\s("'=,:])((?:[A-Za-z]:[\\/]|\\\\|\/\/|\/|~[\\/]|\$(?:HOME|USERPROFILE)[\\/]|%(?:HOME|USERPROFILE)%[\\/]|%HOMEDRIVE%%HOMEPATH%[\\/])[^\r\n"'<>|;,)]*)/gi;
+
+function scrubErrorText(value, key = '') {
+  let text = String(value ?? '');
+  text = text.replace(ERROR_PATH_PATTERN, (match, boundary, path, offset, whole) => {
+    const before = whole.slice(0, offset + boundary.length);
+    const scheme = before.match(/([A-Za-z][A-Za-z0-9+.-]*):$/u)?.[1];
+    if (path.startsWith('//') && /^(?:https?|ftp)$/i.test(scheme || '')) {
+      return match;
+    }
+    return `${boundary}${PATH_REPLACEMENT}`;
+  });
+  return scrubPathText(text, { key }).text;
+}
+
+function scrubApiValue(value, seen = new WeakSet(), key = '') {
+  if (typeof value === 'string') return scrubErrorText(value, key);
+  if (Array.isArray(value)) return value.map((item) => scrubApiValue(item, seen, key));
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return '[circular]';
+    seen.add(value);
+    return Object.fromEntries(Object.entries(value).map(([childKey, child]) => {
+      const safeKey = scrubErrorText(childKey);
+      return [safeKey, scrubApiValue(child, seen, childKey)];
+    }));
+  }
+  return value;
+}
+
 function sendJson(response, status, payload, extraHeaders = {}) {
-  const body = JSON.stringify({ ...payload, apiVersion: 1 });
+  const body = JSON.stringify({ ...payload, apiVersion: API_VERSION });
   response.writeHead(status, {
     ...securityHeaders,
     'content-type': 'application/json; charset=utf-8',
@@ -52,13 +258,25 @@ function sendJson(response, status, payload, extraHeaders = {}) {
 }
 
 function sendError(response, status, code, message, details) {
+  const safeMessage = scrubErrorText(message || 'The request could not be completed.');
+  const safeDetails = details === undefined ? undefined : scrubApiValue(details);
   sendJson(response, status, {
     error: {
       code,
-      message,
-      ...(details ? { details } : {})
+      message: safeMessage,
+      ...(safeDetails !== undefined ? { details: safeDetails } : {})
     }
   });
+}
+
+function sendContract(response, status, route, payload, extraHeaders = {}) {
+  const errors = validateApiResponse(route, payload);
+  if (errors.length) {
+    sendError(response, 500, 'internal_contract_error', 'The server produced an invalid API response.');
+    return false;
+  }
+  sendJson(response, status, payload, extraHeaders);
+  return true;
 }
 
 function parseCookies(header = '') {
@@ -137,16 +355,19 @@ function isOriginAllowed(request, allowed) {
   return Boolean(hostname && allowed.hosts.has(hostname));
 }
 
-async function readJsonBody(request, limit = MAX_BODY_BYTES) {
+async function readJsonBody(request, limit = MAX_BODY_BYTES, { allowEmpty = false } = {}) {
   const contentType = String(request.headers['content-type'] || '');
-  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+  const declaredLength = request.headers['content-length'];
+  const hasNoBody = declaredLength === '0'
+    || (declaredLength === undefined && !request.headers['transfer-encoding']);
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType) && !(allowEmpty && hasNoBody)) {
     const error = new Error('Content-Type must be application/json.');
     error.status = 415;
     error.code = 'unsupported_media_type';
     throw error;
   }
-  const declaredLength = Number(request.headers['content-length'] || 0);
-  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+  const declaredBytes = Number(request.headers['content-length'] || 0);
+  if (Number.isFinite(declaredBytes) && declaredBytes > limit) {
     const error = new Error(`Request body exceeds the ${limit} byte limit.`);
     error.status = 413;
     error.code = 'body_too_large';
@@ -222,40 +443,19 @@ function verificationErrorResponse(error) {
   }
   return {
     code: 'verification_error',
-    message: error instanceof Error ? error.message : 'Repository verification could not be completed.'
+    message: 'Repository verification could not be completed.'
   };
 }
 
 function validateReportRequest(body) {
   const errors = [];
   const add = (path, message) => errors.push({ path, message });
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+  if (!isObject(body)) {
     add('', 'Report request must be a JSON object.');
     return errors;
   }
 
-  const analysis = body.analysis;
-  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) {
-    add('analysis', 'analysis must be an object.');
-  } else {
-    if (analysis.schemaVersion !== 1) add('analysis.schemaVersion', 'analysis.schemaVersion must be 1.');
-    if (!analysis.incident || typeof analysis.incident !== 'object' || Array.isArray(analysis.incident)) {
-      add('analysis.incident', 'analysis.incident must be an object.');
-    } else {
-      for (const field of ['title', 'environment', 'incidentStart']) {
-        if (typeof analysis.incident[field] !== 'string' || !analysis.incident[field].trim()) {
-          add(`analysis.incident.${field}`, `${field} is required.`);
-        }
-      }
-    }
-    if (!Array.isArray(analysis.suspects)) {
-      add('analysis.suspects', 'analysis.suspects must be an array.');
-    }
-    if (!Array.isArray(analysis.timeline)) add('analysis.timeline', 'analysis.timeline must be an array.');
-    if (!Number.isFinite(analysis.candidateWindowMinutes) || analysis.candidateWindowMinutes <= 0) {
-      add('analysis.candidateWindowMinutes', 'candidateWindowMinutes must be a positive number.');
-    }
-  }
+  errors.push(...validateAnalysisShape(body.analysis));
   if (body.verification !== undefined && body.verification !== null
     && (typeof body.verification !== 'object' || Array.isArray(body.verification))) {
     add('verification', 'verification must be a JSON object or null.');
@@ -322,7 +522,7 @@ export function createPatchTraceServer(options = {}) {
         const git = await runCommand(['git', '--version'], root, 2_000);
         const gitAvailable = git.status === 'passed';
         const tempWritable = await access(tmpdir(), fsConstants.W_OK).then(() => true, () => false);
-        sendJson(response, 200, {
+        sendContract(response, 200, 'health', {
           status: gitAvailable ? 'ok' : 'degraded',
           ready: gitAvailable && tempWritable,
           version,
@@ -346,26 +546,26 @@ export function createPatchTraceServer(options = {}) {
 
       if (request.method === 'GET' && pathname === '/api/sample') {
         const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
-        sendJson(response, 200, fixture);
+        sendContract(response, 200, 'sample', fixture);
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/analyze') {
         const input = await readJsonBody(request);
-        const validation = validateIncident(input);
+        const validation = validateApiRequest('analyze', input);
         if (!validation.valid) {
           sendError(response, 400, 'invalid_bundle', 'The incident bundle is invalid.', validation.errors);
           return;
         }
-        sendJson(response, 200, analyzeIncident(input));
+        sendContract(response, 200, 'analyze', analyzeIncident(input));
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/report') {
         const body = await readJsonBody(request);
-        const requestErrors = validateReportRequest(body);
-        if (requestErrors.length) {
-          sendError(response, 400, 'invalid_request', 'Report request does not match the analysis contract.', requestErrors);
+        const validation = validateApiRequest('report', body);
+        if (!validation.valid) {
+          sendError(response, 400, 'invalid_request', 'Report request does not match the analysis contract.', validation.errors);
           return;
         }
         const report = buildReport({
@@ -375,52 +575,35 @@ export function createPatchTraceServer(options = {}) {
           generatedAt: new Date().toISOString(),
           toolVersion: await toolVersionPromise
         });
-        sendJson(response, 200, report);
+        sendContract(response, 200, 'report', report);
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/verify/cancel') {
-        request.resume();
+        const body = await readJsonBody(request, 1024 * 1024, { allowEmpty: true });
+        const validation = validateApiRequest('cancel', body);
+        if (!validation.valid) {
+          sendError(response, 400, 'invalid_request', 'Cancellation request does not match the API contract.', validation.errors);
+          return;
+        }
         if (!currentVerification) {
           sendError(response, 409, 'no_verification_in_progress', 'There is no real verification run to cancel.');
           return;
         }
         currentVerification.abort();
-        sendJson(response, 202, { cancelled: true });
+        sendContract(response, 202, 'cancel', { cancelled: true });
         return;
       }
 
       if (request.method === 'POST' && pathname === '/api/verify') {
         const body = await readJsonBody(request, 1024 * 1024);
-        if (!body || typeof body !== 'object' || Array.isArray(body)) {
-          sendError(response, 400, 'invalid_request', 'Verification request must be a JSON object.');
-          return;
-        }
-        if (typeof body.sha !== 'string' || !/^[0-9a-f]{4,64}$/i.test(body.sha)) {
-          sendError(response, 400, 'invalid_request', 'sha must be a Git commit SHA.');
+        const validation = validateApiRequest('verify', body);
+        if (!validation.valid) {
+          sendError(response, 400, 'invalid_request', 'Verification request does not match the API contract.', validation.errors);
           return;
         }
 
         if (body.repoPath !== undefined) {
-          if (typeof body.repoPath !== 'string' || !body.repoPath.trim()) {
-            sendError(response, 400, 'invalid_request', 'repoPath must be a non-empty string.');
-            return;
-          }
-          if (body.testCommand !== undefined
-            && (!Array.isArray(body.testCommand) || !body.testCommand.length
-              || body.testCommand.some((part) => typeof part !== 'string' || !part || part.includes('\0')))) {
-            sendError(response, 400, 'invalid_request', 'testCommand must be a non-empty argv array of strings without empty or null-containing arguments.');
-            return;
-          }
-          if (body.timeoutMs !== undefined
-            && (!Number.isFinite(body.timeoutMs) || body.timeoutMs < 1 || body.timeoutMs > 600_000)) {
-            sendError(response, 400, 'invalid_request', 'timeoutMs must be between 1 and 600000.');
-            return;
-          }
-          if (body.mainline !== undefined && (!Number.isInteger(body.mainline) || body.mainline < 1)) {
-            sendError(response, 400, 'invalid_request', 'mainline must be a positive integer.');
-            return;
-          }
           if (!enableRealVerification) {
             sendError(response, 403, 'verify_disabled', 'Real repository verification is disabled. Start the server with PATCHTRACE_ENABLE_VERIFY=1 to enable it.');
             return;
@@ -461,17 +644,13 @@ export function createPatchTraceServer(options = {}) {
             realVerificationInFlight = false;
             if (currentVerification === controller) currentVerification = null;
           }
-          sendJson(response, 200, { ...result, source: 'live' });
+          sendContract(response, 200, 'verify', { ...result, source: 'live' });
           return;
         }
 
-        if (!body.analysis || typeof body.analysis !== 'object' || Array.isArray(body.analysis)) {
-          sendError(response, 400, 'invalid_request', 'Fixture verification requires analysis and sha.');
-          return;
-        }
         const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
         const result = verifyFixture({ verification: fixture.verification }, body.sha);
-        sendJson(response, 200, { ...result, source: 'fixture' });
+        sendContract(response, 200, 'verify', { ...result, source: 'fixture' });
         return;
       }
 

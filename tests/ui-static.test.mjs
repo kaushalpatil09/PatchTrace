@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const javascript = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
 
 test('every UI element selector exists in static HTML or a generated template', () => {
   const selectors = [...javascript.matchAll(/\$\(\s*'#([^']+)'\s*\)/g)].map((match) => match[1]);
@@ -37,4 +38,29 @@ test('the UI renders evidence source references and bounded why-not details safe
   assert.match(javascript, /WHY NOT THE TOP SUSPECT/);
   assert.match(javascript, /escapeHtml\(item\.source/);
   assert.match(javascript, /escapeHtml\(reason\)/);
+});
+
+test('the UI exposes landmarks, labels, live regions, and keyboard-safe controls', () => {
+  assert.match(html, /class="skip-link" href="#main-content"/);
+  assert.match(html, /<header[^>]*aria-label="PatchTrace"/);
+  assert.match(html, /<main id="main-content"[^>]*tabindex="-1"/);
+  assert.match(html, /role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(html, /id="bundle-file"[^>]*aria-label="Choose a JSON incident bundle"/);
+  assert.match(html, /aria-labelledby="incident-heading"/);
+  assert.match(html, /aria-labelledby="suspects-heading"/);
+  assert.match(html, /aria-label="Verification results"/);
+  assert.match(javascript, /aria-pressed/);
+  assert.match(javascript, /role="listitem"/);
+  assert.match(javascript, /focus\(\{ preventScroll: true \}\)/);
+  assert.match(javascript, /candidate\.dataset\.sha === state\.selectedSha/);
+});
+
+test('the UI keeps zoom, reduced-motion, contrast, and visible-focus semantics', () => {
+  assert.match(html, /name="viewport" content="width=device-width, initial-scale=1"/);
+  assert.doesNotMatch(html, /user-scalable\s*=\s*no/i);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /@media \(prefers-contrast: more\)/);
+  assert.match(css, /@media \(forced-colors: active\)/);
+  assert.match(css, /scroll-behavior: smooth/);
 });

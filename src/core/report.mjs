@@ -1,9 +1,10 @@
-import { redactDeep, redactSecrets } from './redaction.mjs';
+import { redactAndScrubDeep, redactSecrets, scrubPathText } from './redaction.mjs';
 
 const DEFAULT_TOOL_VERSION = '0.1.0';
 
 function redacted(value) {
-  return redactSecrets(value).text;
+  const secret = redactSecrets(value);
+  return scrubPathText(secret.text).text;
 }
 
 function md(value) {
@@ -23,7 +24,7 @@ function csv(value) {
 }
 
 function jsonFence(value) {
-  const json = (JSON.stringify(redactDeep(value).value, null, 2) ?? 'null')
+  const json = (JSON.stringify(redactAndScrubDeep(value).value, null, 2) ?? 'null')
     .replaceAll('&', '\\u0026')
     .replaceAll('<', '\\u003c')
     .replaceAll('>', '\\u003e');
@@ -63,26 +64,38 @@ export function buildReport({
   if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) {
     throw new Error('analysis is required to build a report.');
   }
-  const safeAnalysis = redactDeep(analysis);
-  const safeVerification = verification === null || verification === undefined ? null : redactDeep(verification);
-  const safeProvenance = redactDeep(provenance);
+  const safeAnalysis = redactAndScrubDeep(analysis);
+  const safeVerification = verification === null || verification === undefined ? null : redactAndScrubDeep(verification);
+  const safeProvenance = redactAndScrubDeep(provenance);
+  const safeGeneratedAt = redactAndScrubDeep(generatedAt);
+  const safeToolVersion = redactAndScrubDeep(toolVersion);
   return {
     schemaVersion: 1,
-    generatedAt,
-    toolVersion,
+    generatedAt: safeGeneratedAt.value,
+    toolVersion: safeToolVersion.value,
     analysis: safeAnalysis.value,
     verification: safeVerification?.value ?? null,
     provenance: safeProvenance.value,
     redaction: {
       applied: true,
-      matches: safeAnalysis.redactions + (safeVerification?.redactions ?? 0) + safeProvenance.redactions
+      matches: safeAnalysis.redactions
+        + (safeVerification?.redactions ?? 0)
+        + safeProvenance.redactions
+        + safeGeneratedAt.redactions
+        + safeToolVersion.redactions,
+      pathsScrubbed: safeAnalysis.pathScrubs
+        + (safeVerification?.pathScrubs ?? 0)
+        + safeProvenance.pathScrubs
+        + safeGeneratedAt.pathScrubs
+        + safeToolVersion.pathScrubs
     }
   };
 }
 
 export function renderMarkdown(report) {
   if (!report?.analysis) throw new Error('A report with analysis is required.');
-  const { analysis, verification, provenance = {}, generatedAt, toolVersion, redaction } = report;
+  const safeReport = redactAndScrubDeep(report).value;
+  const { analysis, verification, provenance = {}, generatedAt, toolVersion, redaction } = safeReport;
   const { incident, suspects, warnings = [], candidateWindowMinutes, excludedCandidateCount } = analysis;
   const repository = provenance.repository;
   const lines = [];
@@ -94,6 +107,9 @@ export function renderMarkdown(report) {
   lines.push(`- Tool: patchtrace ${md(toolVersion)}`);
   if (redaction?.matches) {
     lines.push(`- Redaction: ${md(redaction.matches)} likely secret${redaction.matches === 1 ? '' : 's'} replaced`);
+  }
+  if (redaction?.pathsScrubbed) {
+    lines.push(`- Path scrubbing: ${md(redaction.pathsScrubbed)} absolute or home-directory path${redaction.pathsScrubbed === 1 ? '' : 's'} replaced`);
   }
   lines.push(`- Incident start: ${md(incident.incidentStart)}`);
   lines.push(`- Environment: ${md(incident.environment)}`);
@@ -213,11 +229,12 @@ export function renderMarkdown(report) {
 
 export function renderCsv(analysis) {
   if (!analysis?.suspects) throw new Error('analysis.suspects is required.');
+  const safeAnalysis = redactAndScrubDeep(analysis).value;
   const headers = [
     'rank', 'sha', 'message', 'score', 'confidence', 'coverage',
     'temporal', 'fileOverlap', 'testOverlap', 'diffRisk', 'dependencyImpact', 'missingSignals'
   ];
-  const rows = analysis.suspects.map((suspect, index) => [
+  const rows = safeAnalysis.suspects.map((suspect, index) => [
     index + 1,
     suspect.sha,
     suspect.message,

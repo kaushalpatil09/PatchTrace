@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   analyzeIncident,
   assertValidIncident,
+  deriveDependencyImpact,
   parseDeploymentCsv,
   parseJunitXml,
   validateIncident
@@ -124,6 +125,61 @@ test('reports coverage, missing signals, contributions, and provided sources', (
   assert.equal(suspect.signalSources.dependencyImpact, 'provided');
   assert.equal(suspect.confidence, 'high');
   assert.equal(suspect.contributions.temporal, 0.3 * suspect.factors.temporal);
+});
+
+test('derives dependency impact across common ecosystems with inspectable evidence', () => {
+  const changedFiles = [
+    'package.json', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+    'requirements-dev.txt', 'pyproject.toml', 'poetry.lock',
+    'go.mod', 'go.sum', 'Cargo.toml', 'Cargo.lock',
+    'Gemfile', 'Gemfile.lock', 'pom.xml', 'build.gradle', 'gradle.lockfile'
+  ];
+  const diffStats = changedFiles.map((path, index) => ({
+    path,
+    additions: index + 1,
+    deletions: index % 2,
+    changedLines: index + 1 + (index % 2)
+  }));
+  const derived = deriveDependencyImpact({ changedFiles, diffStats });
+
+  assert.equal(derived.available, true);
+  assert.equal(derived.source, 'derived:dependency-files');
+  assert.ok(derived.value > 0 && derived.value <= 1);
+  assert.deepEqual(derived.details.ecosystems, ['node', 'python', 'go', 'rust', 'ruby', 'maven', 'gradle']);
+  assert.equal(derived.details.dependencyFileCount, changedFiles.length);
+  assert.ok(derived.details.dependencyDiffLines > 0);
+  assert.match(derived.details.formula, /manifestSignal/);
+
+  const input = structuredClone(fixture);
+  const candidate = input.commits[0];
+  delete candidate.dependencyImpact;
+  candidate.changedFiles = ['package.json', 'package-lock.json'];
+  candidate.diffStats = [
+    { path: 'package.json', additions: 2, deletions: 1 },
+    { path: 'package-lock.json', additions: 4, deletions: 2 }
+  ];
+  const suspect = analyzeIncident(input).suspects.find((item) => item.sha === candidate.sha);
+  assert.equal(suspect.signalSources.dependencyImpact, 'derived');
+  assert.ok(suspect.factors.dependencyImpact > 0);
+  assert.equal(suspect.dependencyImpactDetails.dependencyFileCount, 2);
+  assert.ok(suspect.evidence.some((item) => item.kind === 'dependency-impact'
+    && item.origin === 'derived'
+    && /changed dependency files/.test(item.text)
+    && item.details.dependencyFiles.includes('package.json')));
+});
+
+test('keeps explicitly supplied dependency impact distinct from derivation', () => {
+  const input = structuredClone(fixture);
+  const candidate = input.commits[0];
+  candidate.dependencyImpact = 0.17;
+  delete candidate.dependencyImpactSource;
+  candidate.changedFiles = ['package.json', 'package-lock.json'];
+  candidate.diffStats = [{ path: 'package.json', additions: 200, deletions: 10 }];
+
+  const suspect = analyzeIncident(input).suspects.find((item) => item.sha === candidate.sha);
+  assert.equal(suspect.factors.dependencyImpact, 0.17);
+  assert.equal(suspect.signalSources.dependencyImpact, 'provided');
+  assert.equal(suspect.evidence.find((item) => item.kind === 'dependency-impact').origin, 'provided');
 });
 
 test('adds deterministic why-not reasons relative to the top suspect', () => {

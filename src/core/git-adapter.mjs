@@ -1,10 +1,16 @@
-import { resolveCommitSha } from './analysis.mjs';
+import { deriveDependencyImpact, dependencyFileInfo, resolveCommitSha } from './analysis.mjs';
 import { runCommand, assertSupportedRepository, repositorySnapshot } from './verification.mjs';
 
 const MARKER = '--PATCHTRACE--';
 const DEFAULT_MAX_COMMITS = 200;
 const MAX_COMMITS = 500;
-const MAX_DIFF_LINES = 1000;
+const DEFAULT_MAX_CHANGED_FILES = 5000;
+const MAX_CHANGED_FILES = 5000;
+const DEFAULT_MAX_DIFF_LINES = 100_000;
+const MAX_DIFF_LINES = 1_000_000;
+const DIFF_RISK_SATURATION_LINES = 1000;
+const MAX_DEPENDENCY_DETAIL_FILES = 100;
+const OUTPUT_TRUNCATION_MARKER = '[output truncated]';
 
 function clamp(value) {
   return Math.min(1, Math.max(0, value));
@@ -13,19 +19,28 @@ function clamp(value) {
 const ISO_WITH_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 function diffRiskForLines(lines) {
-  return clamp(Math.log1p(lines) / Math.log1p(MAX_DIFF_LINES));
+  return clamp(Math.log1p(lines) / Math.log1p(DIFF_RISK_SATURATION_LINES));
+}
+
+function validateLimit(value, name, maximum) {
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    throw new Error(`${name} must be an integer between 1 and ${maximum}.`);
+  }
+  return value;
 }
 
 export async function readRepositoryHistory({
   repoPath,
   since,
   until,
-  maxCommits = DEFAULT_MAX_COMMITS
+  maxCommits = DEFAULT_MAX_COMMITS,
+  maxChangedFiles = DEFAULT_MAX_CHANGED_FILES,
+  maxDiffLines = DEFAULT_MAX_DIFF_LINES
 } = {}) {
   if (typeof repoPath !== 'string' || !repoPath) throw new Error('repoPath is required.');
-  if (!Number.isInteger(maxCommits) || maxCommits < 1 || maxCommits > MAX_COMMITS) {
-    throw new Error(`maxCommits must be an integer between 1 and ${MAX_COMMITS}.`);
-  }
+  validateLimit(maxCommits, 'maxCommits', MAX_COMMITS);
+  validateLimit(maxChangedFiles, 'maxChangedFiles', MAX_CHANGED_FILES);
+  validateLimit(maxDiffLines, 'maxDiffLines', MAX_DIFF_LINES);
   for (const [label, value] of [['since', since], ['until', until]]) {
     if (value !== undefined && Number.isNaN(Date.parse(value))) {
       throw new Error(`${label} must be a valid date.`);
@@ -52,16 +67,54 @@ export async function readRepositoryHistory({
 
   const commits = [];
   let current = null;
+  const outputTruncated = result.stdout.includes(OUTPUT_TRUNCATION_MARKER);
 
   const finish = () => {
     if (!current) return;
+    const changedFiles = [...new Set(current.changedFiles)];
+    const diffStats = [...new Map(
+      [...current.diffStats, ...current.dependencyStats].map((stat) => [stat.path, stat])
+    ).values()];
+    const dependencyFiles = current.dependencyFiles;
+    const dependency = deriveDependencyImpact({
+      changedFiles: [...changedFiles, ...dependencyFiles.map((file) => file.path)],
+      diffStats,
+      diffLines: current.diffLines,
+      diffRisk: diffRiskForLines(current.diffLines),
+      changedFilesTruncated: current.changedFilesTruncated,
+      diffLinesTruncated: current.diffLinesTruncated,
+      diffOutputTruncated: outputTruncated
+    });
+    const dependencyDetails = dependencyFiles.length
+      ? {
+          ...dependency.details,
+          dependencyFiles: dependencyFiles.map((file) => file.path).slice(0, MAX_DEPENDENCY_DETAIL_FILES),
+          dependencyFileDetails: dependencyFiles.slice(0, MAX_DEPENDENCY_DETAIL_FILES)
+        }
+      : dependency.details;
+    const dependencyFields = dependency.available
+      ? {
+          dependencyImpact: dependency.value,
+          dependencyImpactSource: dependency.source,
+          dependencyImpactDetails: dependencyDetails
+        }
+      : { dependencyImpactDetails: dependencyDetails };
     commits.push({
       sha: current.sha,
       timestamp: current.timestamp,
       message: current.message || `Commit ${current.sha.slice(0, 7)}`,
-      changedFiles: [...new Set(current.changedFiles)],
+      changedFiles,
       diffRisk: diffRiskForLines(current.diffLines),
-      diffRiskSource: 'derived:git'
+      diffRiskSource: 'derived:git',
+      ...dependencyFields,
+      diffLines: current.diffLines,
+      diffStats,
+      ...(current.changedFilesTruncated ? { changedFilesTruncated: true } : {}),
+      ...(current.diffLinesTruncated ? { diffLinesTruncated: true } : {}),
+      ...(outputTruncated ? { diffOutputTruncated: true } : {}),
+      ...(current.changedFilesTruncated || current.diffLinesTruncated || outputTruncated
+        ? { truncated: true }
+        : {})
     });
     current = null;
   };
@@ -71,24 +124,90 @@ export async function readRepositoryHistory({
       finish();
       const [sha, timestamp, message] = line.slice(MARKER.length).split('\0');
       if (!sha || !timestamp) continue;
-      current = { sha, timestamp, message, changedFiles: [], diffLines: 0 };
+      current = {
+        sha,
+        timestamp,
+        message,
+        changedFiles: [],
+        diffStats: [],
+        dependencyStats: [],
+        dependencyFiles: [],
+        diffLines: 0,
+        changedFilesTruncated: false,
+        diffLinesTruncated: false
+      };
       continue;
     }
     if (!current || !line.trim()) continue;
     const [added, deleted, ...pathParts] = line.split('\t');
     const path = pathParts.join('\t').trim();
     if (!path) continue;
-    current.changedFiles.push(path);
+    const normalizedPath = path.replaceAll('\\', '/');
     const additions = Number(added);
     const deletions = Number(deleted);
-    if (Number.isFinite(additions)) current.diffLines += additions;
-    if (Number.isFinite(deletions)) current.diffLines += deletions;
+    const changedLines = (Number.isFinite(additions) && additions >= 0 ? additions : 0)
+      + (Number.isFinite(deletions) && deletions >= 0 ? deletions : 0);
+    const remainingDiffLines = Math.max(0, maxDiffLines - current.diffLines);
+    const observedChangedLines = Math.min(changedLines, remainingDiffLines);
+    if (current.changedFiles.length < maxChangedFiles) {
+      current.changedFiles.push(normalizedPath);
+      current.diffStats.push({
+        path: normalizedPath,
+        additions: Number.isFinite(additions) && additions >= 0 ? additions : 0,
+        deletions: Number.isFinite(deletions) && deletions >= 0 ? deletions : 0,
+        changedLines: observedChangedLines
+      });
+    } else {
+      current.changedFilesTruncated = true;
+    }
+
+    const dependencyInfo = dependencyFileInfo(normalizedPath);
+    if (dependencyInfo && !current.dependencyFiles.some((file) => file.path === dependencyInfo.path)
+      && current.dependencyFiles.length < MAX_DEPENDENCY_DETAIL_FILES) {
+      current.dependencyFiles.push(dependencyInfo);
+      current.dependencyStats.push({
+        path: normalizedPath,
+        additions: Number.isFinite(additions) && additions >= 0 ? additions : 0,
+        deletions: Number.isFinite(deletions) && deletions >= 0 ? deletions : 0,
+        changedLines: observedChangedLines
+      });
+    }
+
+    if (changedLines > remainingDiffLines) {
+      current.diffLines = maxDiffLines;
+      current.diffLinesTruncated = true;
+    } else {
+      current.diffLines += changedLines;
+    }
   }
   finish();
 
+  const commitTruncated = commits.length > maxCommits;
+  const changedFilesTruncated = commits.some((commit) => commit.changedFilesTruncated);
+  const diffLinesTruncated = commits.some((commit) => commit.diffLinesTruncated);
+  const truncated = commitTruncated || changedFilesTruncated || diffLinesTruncated || outputTruncated;
+  const limits = {
+    maxCommits,
+    maxChangedFiles,
+    maxDiffLines,
+    commitsRead: Math.min(commits.length, maxCommits),
+    commitsTruncated: commitTruncated,
+    changedFilesTruncated,
+    diffLinesTruncated,
+    diffOutputTruncated: outputTruncated,
+    reasons: [
+      ...(commitTruncated ? ['commit limit exceeded'] : []),
+      ...(changedFilesTruncated ? ['changed-file limit exceeded'] : []),
+      ...(diffLinesTruncated ? ['diff-line limit exceeded'] : []),
+      ...(outputTruncated ? ['Git output was truncated before parsing completed'] : [])
+    ]
+  };
+
   return {
     commits: commits.slice(0, maxCommits),
-    truncated: commits.length > maxCommits
+    truncated,
+    limits,
+    truncation: limits
   };
 }
 
@@ -112,7 +231,9 @@ export async function repositoryProvenance(repoPath) {
 
 export async function enrichIncidentFromRepository(input, {
   repoPath,
-  maxCommits = DEFAULT_MAX_COMMITS
+  maxCommits = DEFAULT_MAX_COMMITS,
+  maxChangedFiles = DEFAULT_MAX_CHANGED_FILES,
+  maxDiffLines = DEFAULT_MAX_DIFF_LINES
 } = {}) {
   if (!input || typeof input !== 'object') throw new Error('Incident bundle must be an object.');
   if (typeof repoPath !== 'string' || !repoPath) throw new Error('repoPath is required.');
@@ -128,7 +249,14 @@ export async function enrichIncidentFromRepository(input, {
 
   const since = new Date(incidentMs - windowMinutes * 60_000).toISOString();
   const until = new Date(incidentMs).toISOString();
-  const repositoryHistory = await readRepositoryHistory({ repoPath, since, until, maxCommits });
+  const repositoryHistory = await readRepositoryHistory({
+    repoPath,
+    since,
+    until,
+    maxCommits,
+    maxChangedFiles,
+    maxDiffLines
+  });
   const repositoryCommits = repositoryHistory.commits;
   const repositoryShas = repositoryCommits.map((commit) => commit.sha);
   const byFullSha = new Map(repositoryCommits.map((commit) => [commit.sha.toLowerCase(), commit]));
@@ -165,8 +293,25 @@ export async function enrichIncidentFromRepository(input, {
           changedFiles: repositoryCommit.changedFiles.length
             ? repositoryCommit.changedFiles
             : commit.changedFiles,
-          diffRisk: repositoryCommit.diffRisk,
-          diffRiskSource: repositoryCommit.diffRiskSource
+          diffRisk: commit.diffRisk === undefined ? repositoryCommit.diffRisk : commit.diffRisk,
+          diffRiskSource: commit.diffRisk === undefined
+            ? repositoryCommit.diffRiskSource
+            : commit.diffRiskSource,
+          dependencyImpact: commit.dependencyImpact === undefined
+            ? repositoryCommit.dependencyImpact
+            : commit.dependencyImpact,
+          dependencyImpactSource: commit.dependencyImpact === undefined
+            ? repositoryCommit.dependencyImpactSource
+            : commit.dependencyImpactSource,
+          dependencyImpactDetails: commit.dependencyImpact === undefined
+            ? repositoryCommit.dependencyImpactDetails
+            : commit.dependencyImpactDetails,
+          ...(repositoryCommit.diffLines === undefined ? {} : { diffLines: repositoryCommit.diffLines }),
+          ...(repositoryCommit.diffStats === undefined ? {} : { diffStats: repositoryCommit.diffStats }),
+          ...(repositoryCommit.changedFilesTruncated ? { changedFilesTruncated: true } : {}),
+          ...(repositoryCommit.diffLinesTruncated ? { diffLinesTruncated: true } : {}),
+          ...(repositoryCommit.diffOutputTruncated ? { diffOutputTruncated: true } : {}),
+          ...(repositoryCommit.truncated ? { truncated: true } : {})
         };
       })
     : repositoryCommits;
@@ -185,6 +330,8 @@ export async function enrichIncidentFromRepository(input, {
         ambiguousBundleShas,
         unresolvedBundleShas,
         truncated: repositoryHistory.truncated,
+        limits: repositoryHistory.limits,
+        truncation: repositoryHistory.truncation,
         windowMinutes,
         since,
         until

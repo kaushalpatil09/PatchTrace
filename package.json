@@ -2,7 +2,40 @@
   "name": "patchtrace",
   "version": "0.1.0",
   "description": "Local-first incident-to-change analyzer with inspectable evidence and opt-in rollback verification.",
-  "private": true,
+  "license": "MIT",
+  "author": "Kaushal Patil",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kaushalpatil09/PatchTrace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kaushalpatil09/PatchTrace/issues"
+  },
+  "homepage": "https://github.com/kaushalpatil09/PatchTrace#readme",
+  "keywords": [
+    "incident-response",
+    "git",
+    "root-cause-analysis",
+    "developer-tools",
+    "local-first"
+  ],
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "fixtures",
+    "scripts",
+    "server.mjs",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -13,7 +46,15 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
+    "test:ui": "node --test tests/ui-static.test.mjs",
+    "test:cli": "node --test tests/cli.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "coverage": "npm run test:coverage",
     "smoke": "node scripts/smoke.mjs",
+    "doctor": "node bin/patchtrace.mjs doctor",
+    "security": "npm audit --omit=dev --audit-level=high",
+    "check": "npm run test && npm run smoke && npm run doctor -- --json",
+    "check:release": "npm ci --ignore-scripts && npm run check",
     "ingest": "node bin/patchtrace.mjs ingest",
     "patchtrace": "node bin/patchtrace.mjs"
   }

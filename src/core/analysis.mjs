@@ -12,6 +12,23 @@ const MAX_JUNIT_INPUT_LENGTH = 1_000_000;
 const MAX_JUNIT_TAGS = 10_000;
 const MAX_JUNIT_DEPTH = 256;
 const MAX_WHY_NOT_REASONS = 5;
+const MAX_DEPENDENCY_DETAIL_FILES = 100;
+
+const DEPENDENCY_FILE_RULES = Object.freeze([
+  { ecosystem: 'node', kind: 'manifest', pattern: /(^|\/)package\.json$/i },
+  { ecosystem: 'node', kind: 'lockfile', pattern: /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.ya?ml)$/i },
+  { ecosystem: 'python', kind: 'manifest', pattern: /(^|\/)(requirements(?:[-_.][^/]*)?\.txt|requirements\/[^/]+\.txt|pyproject\.toml|setup\.py|setup\.cfg|Pipfile)$/i },
+  { ecosystem: 'python', kind: 'lockfile', pattern: /(^|\/)(poetry\.lock|Pipfile\.lock|uv\.lock)$/i },
+  { ecosystem: 'go', kind: 'manifest', pattern: /(^|\/)go\.mod$/i },
+  { ecosystem: 'go', kind: 'lockfile', pattern: /(^|\/)(go\.sum|vendor\/modules\.txt)$/i },
+  { ecosystem: 'rust', kind: 'manifest', pattern: /(^|\/)Cargo\.toml$/i },
+  { ecosystem: 'rust', kind: 'lockfile', pattern: /(^|\/)Cargo\.lock$/i },
+  { ecosystem: 'ruby', kind: 'manifest', pattern: /(^|\/)(Gemfile|gems\.rb|[^/]+\.gemspec)$/i },
+  { ecosystem: 'ruby', kind: 'lockfile', pattern: /(^|\/)(Gemfile\.lock|gems\.locked)$/i },
+  { ecosystem: 'maven', kind: 'manifest', pattern: /(^|\/)(pom\.xml|dependency-reduced-pom\.xml)$/i },
+  { ecosystem: 'gradle', kind: 'manifest', pattern: /(^|\/)(build\.gradle(?:\.kts)?|settings\.gradle(?:\.kts)?|gradle\.properties)$/i },
+  { ecosystem: 'gradle', kind: 'lockfile', pattern: /(^|\/)(gradle\.lockfile|libs\.versions\.toml)$/i }
+]);
 
 const RANKING_SIGNALS = Object.freeze([
   'temporal',
@@ -110,6 +127,118 @@ function intersection(left, right) {
   return [...setOf(left)].filter((value) => rightSet.has(value));
 }
 
+function normalizeRepositoryPath(value) {
+  return String(value ?? '')
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/^[ab]\//i, '')
+    .replace(/^\/(?:a|b)\//i, '');
+}
+
+export function dependencyFileInfo(file) {
+  const path = normalizeRepositoryPath(file);
+  if (!path) return null;
+  const rule = DEPENDENCY_FILE_RULES.find((candidate) => candidate.pattern.test(path));
+  return rule ? { path, ecosystem: rule.ecosystem, kind: rule.kind } : null;
+}
+
+function normalizedDiffStats(stats) {
+  if (!Array.isArray(stats)) return [];
+  return stats.slice(0, MAX_FILES)
+    .filter((stat) => stat && typeof stat === 'object' && typeof stat.path === 'string')
+    .map((stat) => {
+      const additions = Number(stat.additions);
+      const deletions = Number(stat.deletions);
+      const changedLines = Number(stat.changedLines ?? (
+        (Number.isFinite(additions) ? additions : 0) + (Number.isFinite(deletions) ? deletions : 0)
+      ));
+      return {
+        path: normalizeRepositoryPath(stat.path),
+        additions: Number.isFinite(additions) && additions >= 0 ? additions : 0,
+        deletions: Number.isFinite(deletions) && deletions >= 0 ? deletions : 0,
+        changedLines: Number.isFinite(changedLines) && changedLines >= 0 ? changedLines : 0
+      };
+    })
+    .filter((stat) => stat.path);
+}
+
+/**
+ * Derive a deterministic dependency-blast-radius signal from repository paths
+ * and bounded Git diff statistics. The returned details intentionally expose
+ * the inputs and components so callers can inspect why the value was chosen.
+ */
+export function deriveDependencyImpact(commit = {}) {
+  const hasChangedFileEvidence = Array.isArray(commit.changedFiles) || Array.isArray(commit.diffStats);
+  const changedFilesInputTruncated = Array.isArray(commit.changedFiles) && commit.changedFiles.length > MAX_FILES;
+  const diffStatsInputTruncated = Array.isArray(commit.diffStats) && commit.diffStats.length > MAX_FILES;
+  const changedFiles = Array.isArray(commit.changedFiles)
+    ? [...new Set(commit.changedFiles.slice(0, MAX_FILES).map(normalizeRepositoryPath).filter(Boolean))]
+    : [];
+  const fallbackChangedLines = Number(commit.changedLines ?? commit.diffLines);
+  const fallbackStats = !Array.isArray(commit.diffStats)
+    && changedFiles.length === 1
+    && Number.isFinite(fallbackChangedLines)
+    && fallbackChangedLines >= 0
+    ? [{ path: changedFiles[0], changedLines: fallbackChangedLines }]
+    : [];
+  const stats = normalizedDiffStats(Array.isArray(commit.diffStats) ? commit.diffStats : fallbackStats);
+  const allPaths = [...new Set([...changedFiles, ...stats.map((stat) => stat.path)])];
+  const dependencyFiles = allPaths
+    .map((path) => dependencyFileInfo(path))
+    .filter(Boolean)
+    .slice(0, MAX_DEPENDENCY_DETAIL_FILES);
+  const dependencyByPath = new Map(dependencyFiles.map((file) => [file.path, file]));
+  const dependencyStats = stats.filter((stat) => dependencyByPath.has(stat.path));
+  const dependencyDiffLines = dependencyStats.reduce((total, stat) => total + stat.changedLines, 0);
+  const totalDiffLines = Number(commit.diffLines);
+  const totalObservedDiffLines = Number.isFinite(totalDiffLines) && totalDiffLines >= 0
+    ? totalDiffLines
+    : stats.reduce((total, stat) => total + stat.changedLines, 0);
+  const manifestFiles = dependencyFiles.filter((file) => file.kind === 'manifest').map((file) => file.path);
+  const lockfiles = dependencyFiles.filter((file) => file.kind === 'lockfile').map((file) => file.path);
+  const ecosystems = [...new Set(dependencyFiles.map((file) => file.ecosystem))];
+  const manifestSignal = clamp(manifestFiles.length / 2);
+  const lockfileSignal = clamp(lockfiles.length / 2);
+  const fileSignal = clamp(dependencyFiles.length / 3);
+  const suppliedDiffRisk = Number(commit.diffRisk);
+  const churnSignal = dependencyDiffLines > 0
+    ? clamp(Math.log1p(dependencyDiffLines) / Math.log1p(200))
+    : Number.isFinite(suppliedDiffRisk) ? clamp(suppliedDiffRisk) : 0;
+  const value = hasChangedFileEvidence
+    ? clamp(manifestSignal * 0.45 + lockfileSignal * 0.30 + fileSignal * 0.15 + churnSignal * 0.10)
+    : 0;
+  const available = hasChangedFileEvidence && dependencyFiles.length > 0;
+  const source = available ? 'derived:dependency-files' : null;
+  const details = {
+    formula: '0.45*manifestSignal + 0.30*lockfileSignal + 0.15*fileSignal + 0.10*churnSignal',
+    dependencyFiles: dependencyFiles.map((file) => file.path),
+    manifestFiles,
+    lockfiles,
+    ecosystems,
+    manifestCount: manifestFiles.length,
+    lockfileCount: lockfiles.length,
+    dependencyFileCount: dependencyFiles.length,
+    dependencyDiffLines,
+    totalDiffLines: totalObservedDiffLines,
+    signals: { manifestSignal, lockfileSignal, fileSignal, churnSignal },
+    ...(hasChangedFileEvidence && dependencyFiles.length === 0
+      ? { reason: 'No supported dependency manifest or lockfile changed.' }
+      : {}),
+    ...(commit.changedFilesTruncated ? { changedFilesTruncated: true } : {}),
+    ...(commit.diffLinesTruncated ? { diffLinesTruncated: true } : {}),
+    ...(commit.diffOutputTruncated ? { diffOutputTruncated: true } : {}),
+    ...(changedFilesInputTruncated ? { changedFilesTruncated: true } : {}),
+    ...(diffStatsInputTruncated ? { diffStatsTruncated: true } : {})
+  };
+
+  return {
+    value: available ? value : 0,
+    available,
+    source,
+    details
+  };
+}
+
 function deploymentShas(deployment) {
   return [
     ...(deployment.commitSha ? [deployment.commitSha] : []),
@@ -165,6 +294,39 @@ function providedFactor(value, label) {
     throw new Error(`${label} must be a number between 0 and 1.`);
   }
   return { value: number, provided: true };
+}
+
+function dependencyFactorFor(commit) {
+  const provided = providedFactor(commit.dependencyImpact, `commit ${commit.sha} dependencyImpact`);
+  if (provided.provided) {
+    const source = typeof commit.dependencyImpactSource === 'string'
+      ? commit.dependencyImpactSource
+      : 'provided';
+    return {
+      ...provided,
+      origin: source.startsWith('derived') ? 'derived' : 'provided',
+      source,
+      details: commit.dependencyImpactDetails ?? null
+    };
+  }
+
+  const derived = deriveDependencyImpact(commit);
+  if (!derived.available) {
+    return {
+      value: 0,
+      provided: false,
+      origin: 'missing',
+      source: null,
+      details: null
+    };
+  }
+  return {
+    value: derived.value,
+    provided: true,
+    origin: 'derived',
+    source: derived.source,
+    details: derived.details
+  };
 }
 
 function confidenceFor(score, coverage) {
@@ -558,7 +720,7 @@ export function scoreCommit(commit, input, deploymentMatches) {
   const changedFiles = commit.changedFiles ?? [];
   const fileMatches = intersection(changedFiles, incidentFiles);
   const diff = providedFactor(commit.diffRisk, `commit ${commit.sha} diffRisk`);
-  const dependency = providedFactor(commit.dependencyImpact, `commit ${commit.sha} dependencyImpact`);
+  const dependency = dependencyFactorFor(commit);
   const deploymentMs = deployment ? timestamp(deployment.timestamp, 'deployment timestamp') : null;
   const deploymentBeforeIncident = deploymentMs !== null && deploymentMs <= incidentMs;
   const deploymentAfterCommit = deploymentMs !== null && deploymentMs >= commitMs;
@@ -594,7 +756,7 @@ export function scoreCommit(commit, input, deploymentMatches) {
   const coverage = (Object.keys(signalAvailability).length - missingSignals.length) / Object.keys(signalAvailability).length;
   const confidence = confidenceFor(score, coverage);
   const diffOrigin = commit.diffRiskSource?.startsWith('derived') ? 'derived' : 'provided';
-  const dependencyOrigin = commit.dependencyImpactSource?.startsWith('derived') ? 'derived' : 'provided';
+  const dependencyOrigin = dependency.origin;
   const signalSources = {
     temporal: usableDeployment ? 'derived' : 'missing',
     fileOverlap: incidentFiles.length ? 'derived' : 'missing',
@@ -699,9 +861,10 @@ export function scoreCommit(commit, input, deploymentMatches) {
     ? {
         kind: 'dependency-impact',
         weight: factors.dependencyImpact,
-        text: `Dependency blast-radius signal is ${(factors.dependencyImpact * 100).toFixed(0)}% (${dependencyOrigin === 'derived' ? 'derived from the package graph' : 'provided input'}).`,
-        source: 'commit.dependencyImpact',
-        origin: dependencyOrigin
+        text: `Dependency blast-radius signal is ${(factors.dependencyImpact * 100).toFixed(0)}% (${dependencyOrigin === 'derived' ? 'derived from changed dependency files and diff statistics' : 'provided input'}).`,
+        source: dependency.source || 'commit.dependencyImpact',
+        origin: dependencyOrigin,
+        ...(dependency.details ? { details: dependency.details } : {})
       }
     : {
         kind: 'missing-dependency-impact',
@@ -723,6 +886,10 @@ export function scoreCommit(commit, input, deploymentMatches) {
     signalSources,
     factors,
     contributions,
+    dependencyImpactDetails: dependency.details,
+    signalDetails: {
+      dependencyImpact: dependency.details
+    },
     evidence,
     relatedTests: relatedTests.map((test) => ({
       name: test.name,
@@ -827,6 +994,30 @@ export function validateIncident(input) {
           commit.changedFiles.forEach((file, fileIndex) => {
             if (!isNonEmptyString(file)) add(`${path}.changedFiles[${fileIndex}]`, 'File path must be a non-empty string.');
           });
+        }
+      }
+      if (commit.diffLines !== undefined
+        && (!Number.isFinite(commit.diffLines) || commit.diffLines < 0)) {
+        add(`${path}.diffLines`, 'diffLines must be a non-negative number.');
+      }
+      if (commit.diffStats !== undefined && !Array.isArray(commit.diffStats)) {
+        add(`${path}.diffStats`, 'diffStats must be an array.');
+      } else if (Array.isArray(commit.diffStats) && commit.diffStats.length > MAX_FILES) {
+        add(`${path}.diffStats`, `diffStats must contain at most ${MAX_FILES} entries.`);
+      }
+      if (commit.dependencyImpactDetails !== undefined
+        && (!commit.dependencyImpactDetails
+          || typeof commit.dependencyImpactDetails !== 'object'
+          || Array.isArray(commit.dependencyImpactDetails))) {
+        add(`${path}.dependencyImpactDetails`, 'dependencyImpactDetails must be an object.');
+      } else if (commit.dependencyImpactDetails) {
+        for (const field of ['dependencyFiles', 'manifestFiles', 'lockfiles', 'dependencyFileDetails']) {
+          const values = commit.dependencyImpactDetails[field];
+          if (values !== undefined && !Array.isArray(values)) {
+            add(`${path}.dependencyImpactDetails.${field}`, `${field} must be an array.`);
+          } else if (Array.isArray(values) && values.length > MAX_DEPENDENCY_DETAIL_FILES) {
+            add(`${path}.dependencyImpactDetails.${field}`, `${field} must contain at most ${MAX_DEPENDENCY_DETAIL_FILES} entries.`);
+          }
         }
       }
       for (const factor of ['diffRisk', 'dependencyImpact']) {

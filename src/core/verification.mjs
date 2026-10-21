@@ -1,9 +1,16 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, lstat, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
+import {
+  ContainerCancelledError,
+  ContainerUnavailableError,
+  containerSettings as resolveContainerSettings,
+  createContainerCommandRunner,
+  prepareContainerRuntime
+} from './container-runner.mjs';
 import { redactSecrets } from './redaction.mjs';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -14,6 +21,8 @@ const DEFAULT_BASELINE_RUNS = 2;
 const MAX_BASELINE_RUNS = 3;
 const WORKSPACE_MARKER = '.patchtrace-workspace';
 const DEFAULT_STALE_AGE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_REPOSITORY_COPY_BYTES = 2 * 1024 ** 3;
+const DEFAULT_MIN_FREE_BYTES = 256 * 1024 ** 2;
 
 const SAFE_ENV_KEYS = new Set([
   'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'ComSpec', 'COMSPEC',
@@ -27,6 +36,15 @@ export class SafetyError extends Error {
     super(message);
     this.name = 'SafetyError';
     this.code = code;
+  }
+}
+
+class VerificationLimitError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = 'VerificationLimitError';
+    this.code = code;
+    this.details = details;
   }
 }
 
@@ -125,6 +143,105 @@ function validateTimeout(timeoutMs) {
   if (timeoutMs > MAX_TIMEOUT_MS) {
     throw new Error(`timeoutMs must be no greater than ${MAX_TIMEOUT_MS} ms.`);
   }
+}
+
+function validateNonNegativeLimit(value, name) {
+  const number = typeof value === 'string' && value.trim() ? Number(value) : value;
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw new Error(`${name} must be a non-negative safe integer.`);
+  }
+  return number;
+}
+
+function configuredLimit(value, environmentKey, fallback, name) {
+  return validateNonNegativeLimit(
+    value === undefined ? (process.env[environmentKey] ?? fallback) : value,
+    name
+  );
+}
+
+async function measureRepositoryCopySize(repoPath, limitBytes, signal) {
+  const pending = [repoPath];
+  let totalBytes = 0;
+  while (pending.length) {
+    if (signal?.aborted) return { cancelled: true };
+    const current = pending.pop();
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (signal?.aborted) return { cancelled: true };
+      const entryPath = join(current, entry.name);
+      const entryStats = await lstat(entryPath);
+      if (entryStats.isDirectory() && !entryStats.isSymbolicLink()) {
+        pending.push(entryPath);
+        continue;
+      }
+      totalBytes += Number(entryStats.size) || 0;
+      if (totalBytes > limitBytes) return { bytes: totalBytes, exceeded: true };
+    }
+  }
+  return { bytes: totalBytes, exceeded: false };
+}
+
+async function availableSpaceBytes(path) {
+  try {
+    const filesystem = await statfs(path);
+    const blockSize = Number(filesystem.bsize || filesystem.frsize || 0);
+    const availableBlocks = Number(filesystem.bavail ?? filesystem.bfree ?? 0);
+    if (!Number.isSafeInteger(blockSize) || blockSize <= 0
+      || !Number.isSafeInteger(availableBlocks) || availableBlocks < 0) {
+      return null;
+    }
+    const available = blockSize * availableBlocks;
+    return Number.isSafeInteger(available) ? available : null;
+  } catch {
+    return null;
+  }
+}
+
+async function verificationPreflight(repoPath, tempParent, {
+  maxRepositoryCopyBytes,
+  minFreeBytes,
+  signal
+}) {
+  if (signal?.aborted) return { cancelled: true };
+  const copy = await measureRepositoryCopySize(repoPath, maxRepositoryCopyBytes, signal);
+  if (copy.cancelled) return { cancelled: true };
+  if (copy.exceeded) {
+    throw new VerificationLimitError(
+      'repository_copy_too_large',
+      `The repository copy is larger than the configured ${maxRepositoryCopyBytes} byte verification limit.`,
+      { repositoryBytes: copy.bytes, maxRepositoryCopyBytes }
+    );
+  }
+  if (signal?.aborted) return { cancelled: true };
+  const freeBytes = await availableSpaceBytes(tempParent);
+  if (freeBytes !== null && freeBytes < copy.bytes + minFreeBytes) {
+    throw new VerificationLimitError(
+      'insufficient_disk_space',
+      `Verification needs the repository copy plus ${minFreeBytes} bytes of free space, but only ${freeBytes} bytes are available.`,
+      { repositoryBytes: copy.bytes, freeBytes, minFreeBytes }
+    );
+  }
+  return { repositoryBytes: copy.bytes, freeBytes };
+}
+
+async function makeWorkspaceWritable(root, signal) {
+  const pending = [root];
+  while (pending.length) {
+    if (signal?.aborted) return false;
+    const current = pending.pop();
+    const currentStats = await lstat(current);
+    if (currentStats.isDirectory() && !currentStats.isSymbolicLink()) {
+      await chmod(current, (currentStats.mode & 0o777) | 0o777);
+      for (const entry of await readdir(current, { withFileTypes: true })) {
+        pending.push(join(current, entry.name));
+      }
+      continue;
+    }
+    if (currentStats.isSymbolicLink()) continue;
+    await chmod(current, (currentStats.mode & 0o777) | 0o222);
+  }
+  return true;
 }
 
 function appendOutput(current, chunk) {
@@ -403,7 +520,14 @@ async function assertNoSymlinkOutsideRepository(repoPath) {
   }
 }
 
-function baseResult(candidateSha) {
+function baseResult(candidateSha, {
+  isolation = 'temp-copy',
+  isolationRequested = isolation,
+  containerRuntime = null,
+  containerImage = null,
+  maxRepositoryCopyBytes = null,
+  minFreeBytes = null
+} = {}) {
   return {
     status: 'failed',
     outcome: 'not_confirmed',
@@ -418,7 +542,14 @@ function baseResult(candidateSha) {
     sourceUnchanged: true,
     sourceDirty: false,
     cleanup: { removed: false },
-    isolation: 'temp-copy',
+    isolation,
+    isolationRequested,
+    containerRuntime,
+    containerImage,
+    repositoryBytes: null,
+    freeSpaceBytes: null,
+    maxRepositoryCopyBytes,
+    minFreeBytes,
     platform: process.platform,
     testCommand: null,
     timeoutMs: null,
@@ -445,6 +576,7 @@ function outcomeFor(result) {
   if (result.status === 'passed') return 'confirmed';
   if (result.status === 'timeout') return 'timeout';
   if (result.status === 'cancelled') return 'cancelled';
+  if (result.status === 'unsupported') return 'unsupported';
   if (result.status === 'missing_history') return 'invalid_repo';
   if (result.status === 'unsupported_layout') return 'invalid_repo';
   if (result.status === 'failed' && result.reason === 'baseline_did_not_fail') return 'inconclusive';
@@ -463,6 +595,19 @@ function cancelResult(result, message) {
   return result;
 }
 
+function unsupportedResult(base, error) {
+  return {
+    ...base,
+    ...(error.details && typeof error.details === 'object' ? error.details : {}),
+    status: 'unsupported',
+    outcome: 'unsupported',
+    reason: error.code || 'unsupported',
+    message: error.message,
+    sourceUnchanged: true,
+    cleanup: { removed: false, skipped: true }
+  };
+}
+
 export async function verifyRollback({
   repoPath,
   candidateSha,
@@ -471,7 +616,21 @@ export async function verifyRollback({
   tempRoot = tmpdir(),
   mainline,
   baselineRuns = DEFAULT_BASELINE_RUNS,
-  signal
+  signal,
+  isolation: requestedIsolation = process.env.PATCHTRACE_VERIFY_ISOLATION || 'temp-copy',
+  containerRuntime,
+  containerImage,
+  containerUser,
+  containerCpus,
+  containerMemory,
+  containerPidsLimit,
+  containerTmpfsSize,
+  maxRepositoryCopyBytes,
+  maxCopyBytes,
+  minFreeBytes,
+  minimumFreeBytes,
+  commandRunner: injectedCommandRunner,
+  runCommand: injectedRunCommand
 }) {
   validateCommand(testCommand);
   validateTimeout(timeoutMs);
@@ -485,6 +644,42 @@ export async function verifyRollback({
   if (mainline !== undefined && (!Number.isInteger(mainline) || mainline < 1)) {
     throw new Error('mainline must be a positive integer when verifying a merge commit.');
   }
+
+  const isolation = requestedIsolation === 'production' ? 'container' : requestedIsolation;
+  if (!['temp-copy', 'container'].includes(isolation)) {
+    throw new Error('isolation must be "container" (production) or "temp-copy" (trusted local preview).');
+  }
+  const maxCopyLimit = configuredLimit(
+    maxRepositoryCopyBytes ?? maxCopyBytes,
+    'PATCHTRACE_VERIFY_MAX_COPY_BYTES',
+    DEFAULT_MAX_REPOSITORY_COPY_BYTES,
+    'maxRepositoryCopyBytes'
+  );
+  const freeSpaceLimit = configuredLimit(
+    minFreeBytes ?? minimumFreeBytes,
+    'PATCHTRACE_VERIFY_MIN_FREE_BYTES',
+    DEFAULT_MIN_FREE_BYTES,
+    'minFreeBytes'
+  );
+  const commandRunner = injectedCommandRunner || injectedRunCommand || runCommand;
+  if (typeof commandRunner !== 'function') throw new Error('commandRunner must be a function.');
+  const requestedContainerRuntime = containerRuntime
+    ?? process.env.PATCHTRACE_CONTAINER_RUNTIME
+    ?? null;
+  const requestedContainerImage = containerImage
+    ?? process.env.PATCHTRACE_VERIFY_IMAGE
+    ?? 'patchtrace:local';
+  const configuredContainerSettings = isolation === 'container'
+    ? resolveContainerSettings({
+        runtime: requestedContainerRuntime,
+        image: requestedContainerImage,
+        user: containerUser,
+        cpus: containerCpus,
+        memory: containerMemory,
+        pidsLimit: containerPidsLimit,
+        tmpfsSize: containerTmpfsSize
+      })
+    : null;
 
   const startedMs = Date.now();
   const seal = (value) => {
@@ -503,7 +698,14 @@ export async function verifyRollback({
     throw new Error('tempRoot cannot be inside repoPath.');
   }
 
-  const base = baseResult(candidateSha);
+  const base = baseResult(candidateSha, {
+    isolation,
+    isolationRequested: requestedIsolation,
+    containerRuntime: isolation === 'container' ? requestedContainerRuntime : null,
+    containerImage: isolation === 'container' ? requestedContainerImage : null,
+    maxRepositoryCopyBytes: maxCopyLimit,
+    minFreeBytes: freeSpaceLimit
+  });
   base.testCommand = testCommand;
   base.timeoutMs = timeoutMs;
   base.baselineRunsRequested = baselineRuns;
@@ -549,6 +751,59 @@ export async function verifyRollback({
     });
   }
 
+  let containerInfo = null;
+  if (isolation === 'container') {
+    try {
+      containerInfo = await prepareContainerRuntime({
+        runtime: requestedContainerRuntime,
+        image: requestedContainerImage,
+        commandRunner,
+        cwd: process.cwd(),
+        timeoutMs: Math.min(timeoutMs, 10_000),
+        signal
+      });
+      base.containerRuntime = containerInfo.runtime;
+      base.containerImage = containerInfo.image;
+    } catch (error) {
+      if (error instanceof ContainerCancelledError) {
+        return seal(cancelResult(
+          { ...base, cleanup: { removed: false, skipped: true } },
+          'Verification was cancelled while checking the container runtime.'
+        ));
+      }
+      if (error instanceof ContainerUnavailableError) {
+        return seal(unsupportedResult(base, error));
+      }
+      throw error;
+    }
+  }
+
+  let preflight;
+  try {
+    preflight = await verificationPreflight(sourcePath, tempParent, {
+      maxRepositoryCopyBytes: maxCopyLimit,
+      minFreeBytes: freeSpaceLimit,
+      signal
+    });
+  } catch (error) {
+    if (error instanceof VerificationLimitError) return seal(unsupportedResult(base, error));
+    return seal({
+      ...base,
+      status: 'failed',
+      reason: 'runner_error',
+      message: `Verification preflight could not complete: ${error.message}`,
+      cleanup: { removed: false, skipped: true }
+    });
+  }
+  if (preflight.cancelled) {
+    return seal(cancelResult(
+      { ...base, cleanup: { removed: false, skipped: true } },
+      'Verification was cancelled during the repository preflight.'
+    ));
+  }
+  base.repositoryBytes = preflight.repositoryBytes;
+  base.freeSpaceBytes = preflight.freeBytes;
+
   let temporaryRoot;
   try {
     temporaryRoot = await mkdtemp(join(tempParent, 'patchtrace-'));
@@ -583,26 +838,50 @@ export async function verifyRollback({
       verbatimSymlinks: true
     });
     await assertNoSymlinkOutsideRepository(workspace);
+    let executeCommand = runCommand;
+    if (isolation === 'container') {
+      const workspaceWritable = await makeWorkspaceWritable(workspace, signal);
+      if (!workspaceWritable) return cancelResult(result, 'Verification was cancelled while preparing the container workspace.');
+      executeCommand = createContainerCommandRunner({
+        ...configuredContainerSettings,
+        runtime: containerInfo.runtime,
+        image: containerInfo.image,
+        sourcePath,
+        workspacePath: workspace,
+        commandRunner,
+        hostCwd: process.cwd()
+      });
+    }
+    const workspaceGit = (args, timeout = 10_000, options = {}) => executeCommand(
+      [
+        'git',
+        '-c', 'core.hooksPath=',
+        '-c', 'core.fsmonitor=false',
+        ...(isolation === 'container' ? ['-c', 'safe.directory=/patchtrace/workspace'] : []),
+        ...args
+      ],
+      workspace,
+      timeout,
+      options
+    );
     if (signal?.aborted) return cancelResult(result, 'Verification was cancelled during the repository copy.');
 
-    const candidateExists = await git(workspace, ['rev-parse', '--verify', `${candidateSha}^{commit}`], 10_000, { signal });
+    const candidateExists = await workspaceGit(['rev-parse', '--verify', `${candidateSha}^{commit}`], 10_000, { signal });
     if (candidateExists.status === 'cancelled') {
       return cancelResult(result, 'Verification was cancelled while checking the candidate commit.');
     }
     const candidateReachable = candidateExists.status === 'passed'
-      ? await git(workspace, ['merge-base', '--is-ancestor', candidateSha, 'HEAD'], 10_000, { signal })
+      ? await workspaceGit(['merge-base', '--is-ancestor', candidateSha, 'HEAD'], 10_000, { signal })
       : candidateExists;
     if (candidateReachable.status === 'cancelled') {
       return cancelResult(result, 'Verification was cancelled while checking candidate reachability.');
     }
     if (candidateExists.status !== 'passed' || candidateReachable.status !== 'passed') {
-      return {
-        ...result,
-        status: 'missing_history',
-        outcome: 'invalid_repo',
-        reason: 'candidate_missing_or_unreachable',
-        message: 'The candidate commit is missing from the copied repository or is not reachable from HEAD.'
-      };
+      result.status = 'missing_history';
+      result.outcome = 'invalid_repo';
+      result.reason = 'candidate_missing_or_unreachable';
+      result.message = 'The candidate commit is missing from the copied repository or is not reachable from HEAD.';
+      return result;
     }
 
     const overallBudgetMs = timeoutMs * (baselineRuns + 1) + 10_000;
@@ -620,7 +899,7 @@ export async function verifyRollback({
         result.message = `The overall ${overallBudgetMs} ms verification budget was exhausted before baseline run ${index + 1}.`;
         return result;
       }
-      const baseline = await runCommand(
+      const baseline = await executeCommand(
         testCommand,
         workspace,
         Math.max(1, Math.min(timeoutMs, remaining)),
@@ -666,8 +945,7 @@ export async function verifyRollback({
     const revertArgs = ['revert', '--no-commit', '--no-edit'];
     if (mainline !== undefined) revertArgs.push('-m', String(mainline));
     revertArgs.push(candidateSha);
-    const revert = await git(
-      workspace,
+    const revert = await workspaceGit(
       revertArgs,
       Math.max(1, Math.min(10_000, remainingBudget())),
       { signal }
@@ -701,7 +979,7 @@ export async function verifyRollback({
       result.message = `The overall ${overallBudgetMs} ms verification budget was exhausted before the candidate test run.`;
       return result;
     }
-    result.candidate = await runCommand(
+    result.candidate = await executeCommand(
       testCommand,
       workspace,
       Math.max(1, Math.min(timeoutMs, remainingBudget())),

@@ -6,7 +6,7 @@ PatchTrace is a local-first incident-to-change analyzer for small engineering te
 
 It is deliberately **not** a chatbot, a cloud observability dashboard, or a production rollback tool. A ranking is evidence, not proof of root cause.
 
-> **Project status:** early-stage (`0.1.0`). The safety controls and the main vertical slice are implemented and tested. Production hardening is tracked in [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
+> **Project status:** early-stage (`0.1.0`). The safety controls, release metadata, accessibility baseline, Docker packaging, and main vertical slice are implemented and tested. Production hardening is tracked in [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) and [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
 
 | | |
 | --- | --- |
@@ -16,6 +16,7 @@ It is deliberately **not** a chatbot, a cloud observability dashboard, or a prod
 | **Inspectable** | Every suspect exposes factors, weighted contributions, evidence, coverage, and missing signals. |
 | **Read-only by default** | Analysis never mutates the source repository. |
 | **Opt-in verification** | Real rollback checks are disabled unless explicitly enabled. |
+| **Release-ready metadata** | MIT licensed, public npm metadata, reproducible local gates, and an Ubuntu Docker CI job. |
 
 ## Why PatchTrace
 
@@ -46,7 +47,7 @@ It is built for maintainers and engineers who cannot or do not want to send priv
 - No runtime dependencies, external services, or network access for normal analysis.
 - Docker is optional.
 
-`node bin/patchtrace.mjs doctor` checks Node, Git, and temporary-directory writability.
+`node bin/patchtrace.mjs doctor` checks Node, Git, temporary-directory writability, and reports Docker/Podman plus the configured verification image. Container readiness is optional for local analysis but required for production-isolation mode.
 
 ## Quick start
 
@@ -92,6 +93,30 @@ node --env-file=.env server.mjs
 | `PATCHTRACE_ALLOWED_HOSTS` | empty | Comma-separated extra hostnames allowed in `Host`/`Origin` checks. |
 | `PATCHTRACE_VERIFY_ENV` | empty | Comma-separated environment variable allowlist for verification commands. |
 | `PATCHTRACE_TOKEN` | random per start | Fixed API token. If unset, a random token is generated and printed at startup. |
+| `PATCHTRACE_VERIFY_ISOLATION` | `temp-copy` | Set to `production` to require the constrained container runner for real verification. |
+| `PATCHTRACE_CONTAINER_RUNTIME` | auto | Optional Docker or Podman executable name. Auto-detects Docker, then Podman. |
+| `PATCHTRACE_VERIFY_IMAGE` | `patchtrace:local` | Pre-built local image required by production isolation. The runtime never pulls it. |
+| `PATCHTRACE_VERIFY_USER` | `65532:65532` | Non-root numeric UID:GID used by constrained containers. |
+| `PATCHTRACE_VERIFY_CPUS` | `1` | CPU limit for each production verification container. |
+| `PATCHTRACE_VERIFY_MEMORY` | `512m` | Memory limit for each production verification container. |
+| `PATCHTRACE_VERIFY_PIDS_LIMIT` | `256` | Maximum process count for each production verification container. |
+| `PATCHTRACE_VERIFY_TMPFS_SIZE` | `64m` | Writable `/tmp` size inside each production verification container. |
+| `PATCHTRACE_VERIFY_MAX_COPY_BYTES` | `2147483648` | Maximum source-repository copy size for temporary-copy verification. |
+| `PATCHTRACE_VERIFY_MIN_FREE_BYTES` | `268435456` | Minimum free space required before creating a verification copy. |
+
+### Operational readiness and resource limits
+
+PatchTrace is a single-user local service. Keep it bound to loopback unless the host firewall and authentication policy are deliberately configured for another trusted operator. It does not persist bundles, reports, or investigation history; retain exported files according to your incident-handling policy and remove temporary copies after a run.
+
+The local API rejects oversized input before analysis: analysis and report requests are capped at 5 MB, verification requests at 1 MB, and CLI input files at 5 MB. Bundle validation caps commits at 2,000, deployments at 2,000, tests at 5,000, files at 5,000, and incident events at 2,000. Git enrichment defaults to 200 commits and caps history at 500 commits and 5,000 changed files per commit; diff parsing is bounded to 100,000 changed lines per commit by default (1,000,000 maximum) and by the 256 KB Git output cap. JUnit input is capped at 1,000,000 characters with bounded tags and nesting. Verification commands have a 10-minute per-command maximum, capped output, a 2 GB repository-copy limit, and a 256 MB minimum free-space requirement by default.
+
+Run the local readiness check before collecting evidence:
+
+```bash
+npm run doctor -- --json
+```
+
+`doctor.ok` means Node, Git, and a writable temporary directory are ready for local analysis, plus the container gate when `PATCHTRACE_VERIFY_ISOLATION=production` or `--strict-container` requires it. The result also includes `container.ready`, `container.runtimeReady`, `container.imageReady`, `container.status`, `containerRequired`, and `productionReady`; an unavailable runtime or image is reported explicitly and never presented as production-isolated readiness. Use `--strict-container` when a release or operator gate must fail unless the configured runtime and image are ready.
 
 ### Local session security
 
@@ -201,7 +226,7 @@ Each candidate commit receives a deterministic score between `0` and `1`:
 | Incident-file overlap | 25% | Changed files that overlap `incidentFiles`. |
 | Test overlap | 20% | Failing tests whose `relatedFiles` overlap the commit's changed files. |
 | Diff risk | 15% | Provided `diffRisk`, or derived from Git churn with `--repo`. |
-| Dependency impact | 10% | Provided `dependencyImpact`; package-graph derivation is not implemented yet. |
+| Dependency impact | 10% | Provided value, or derived from supported dependency manifests/lockfiles and bounded diff churn. |
 
 For every suspect the output includes:
 
@@ -303,12 +328,13 @@ PATCHTRACE_ENABLE_VERIFY=1 npm start
 The verifier:
 
 1. Refuses linked worktrees, repositories with submodules, bare repositories, shallow clones, filesystem roots, dirty worktrees (including untracked files), and symlinks that escape the repository.
-2. Copies the repository into a fresh, marked temporary directory.
-3. Runs the baseline test command twice and reports a pass/fail disagreement as a flaky, inconclusive baseline.
-4. Runs `git revert --no-commit` only in the copy.
-5. Runs the test command again and compares results.
-6. Caps and best-effort redacts command output, removes the temporary copy, and checks the source repository's HEAD/status/config fingerprint.
-7. Supports cancellation from the UI/API and sweeps marked workspaces left by an older crash.
+2. Copies the repository into a fresh, marked temporary directory. The default `temp-copy` mode is best-effort isolation for trusted local previews.
+3. When `PATCHTRACE_VERIFY_ISOLATION=production`, requires a ready Docker or Podman runtime and pre-built image, then runs each phase in a constrained non-root container with no network and bounded resources; it never silently falls back to temp-copy mode.
+4. Runs the baseline test command twice and reports a pass/fail disagreement as a flaky, inconclusive baseline.
+5. Runs `git revert --no-commit` only in the copy or constrained workspace.
+6. Runs the test command again and compares results.
+7. Caps and best-effort redacts command output, removes the temporary copy, and checks the source repository's HEAD/status/config fingerprint.
+8. Supports cancellation from the UI/API and sweeps marked workspaces left by an older crash.
 
 ```bash
 node bin/patchtrace.mjs verify \
@@ -327,11 +353,13 @@ node bin/patchtrace.mjs verify \
 
 On Windows, `.cmd` and `.bat` launchers such as `npm` are invoked through `cmd.exe` without the caller building a shell string. Batch-file semantics still apply, so prefer explicit JSON argv when quoting is unusual.
 
-### Verification is not a sandbox
+### Verification isolation and limits
 
-The temp-copy runner is **best-effort isolation, not a security boundary**. A hostile test command can still read or modify files outside the repository, access the network, and consume CPU or memory. Only run trusted test commands against trusted repositories. Use a dedicated container or VM with a read-only repository mount and network isolation when a real security boundary is required.
+The default temp-copy runner is **best-effort isolation, not a security boundary**. A hostile test command can still read or modify files outside the repository, access the network, and consume CPU or memory. Only run trusted test commands against trusted repositories. Production mode is the constrained container path, but the Docker/Podman daemon and host remain operator-controlled; use a dedicated VM when a stronger boundary is required.
 
-A confirmed result means the revert changed the test outcome in the temporary copy. It supports the rollback hypothesis; it does not prove root cause or production safety.
+Production mode requires the runtime and image to be available before any test command starts. `npm run doctor -- --json` reports `container.ready` and `productionReady`; `npm run doctor -- --strict-container` fails when the configured runtime/image is unavailable. Per-command timeouts, output caps, repository-copy/free-space limits, and container CPU/memory/PID/tmpfs limits are documented in the operational table above.
+
+A confirmed result means the revert changed the test outcome in the temporary copy or constrained container workspace. It supports the rollback hypothesis; it does not prove root cause or production safety.
 
 ## HTTP API
 
@@ -372,7 +400,7 @@ JSON report exports and the UI download are deep-redacted: string values matchin
 Redaction is **best-effort**:
 
 - Unusual secret formats can be missed, and matching text can be over-redacted.
-- Local filesystem paths and repository names are **not** scrubbed.
+- Absolute local filesystem and home-directory paths are scrubbed from report exports. Repository-relative evidence paths remain, and repository names or path fragments can still appear in commit messages, test names, or other evidence text.
 - Raw `/api/analyze` responses are **not** report exports and are not redacted.
 
 Treat every bundle, analysis response, report, and verification output as sensitive. Review exports before sharing.
@@ -396,9 +424,21 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the threat model and [`docs/PRIVA
 npm test
 npm run smoke
 node bin/patchtrace.mjs doctor --json
+npm run security
 ```
 
-`npm test` uses the Node built-in test runner and covers analysis, scoring, bundle validation, CSV/JUnit parsing, Git enrichment, reports and redaction, API security, CLI behavior, UI static wiring, temporary-copy verification, flaky baselines, cancellation, stale-workspace sweeping, bundle collection limits, and a synthetic maximum-size bundle. The suite is split across 10 files in `tests/`.
+Additional local gates are available without adding a second test framework:
+
+```bash
+npm run test:ui
+npm run test:cli
+npm run check
+npm run test:coverage
+```
+
+`test:coverage` uses Node's built-in test coverage instrumentation and is an on-demand compatibility path; this repository does not claim a coverage percentage until that command is run and its output is reviewed. `npm run security` runs the package-manager audit for the currently installed dependency graph.
+
+`npm test` uses the Node built-in test runner and covers analysis, scoring, bundle validation, CSV/JUnit parsing, Git enrichment, reports and redaction, API security, CLI behavior, UI accessibility/static wiring, temporary-copy and container preflight verification, flaky baselines, cancellation, stale-workspace sweeping, bundle collection limits, and a synthetic maximum-size bundle. The suite is split across the test files in `tests/`.
 
 `npm run smoke` starts the server on an ephemeral port, checks the home page and session cookie, verifies unauthenticated rejection, loads and analyzes the sample, runs fixture verification, exports a redacted report, and stops the server.
 
@@ -419,7 +459,25 @@ docker build -t patchtrace:local .
 docker run --rm -p 127.0.0.1:4173:4173 patchtrace:local
 ```
 
-The image installs Git, runs as the non-root `node` user, binds `0.0.0.0` inside the container, and includes a healthcheck. Real verification is disabled by default.
+The Dockerfile uses a dependency stage and a small runtime stage. The runtime installs Git and CA certificates, runs as the non-root `node` user, binds `0.0.0.0` inside the container, and includes a `/api/health` healthcheck that requires `status: "ok"` and `ready: true` (not just an HTTP 200). Real verification is disabled by default. The Ubuntu CI job builds the image, starts it, checks the health endpoint and Docker health state, and asserts that the process is not root.
+
+For a local release gate, run the same checks explicitly:
+
+```bash
+docker build -t patchtrace:local .
+container_id="$(docker run -d --rm --name patchtrace-local -p 127.0.0.1:4173:4173 patchtrace:local)"
+trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+curl --fail --retry 10 --retry-delay 1 http://127.0.0.1:4173/api/health
+health=""
+for attempt in $(seq 1 30); do
+  health="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
+  [[ "$health" == healthy ]] && break
+  [[ "$health" == unhealthy ]] && exit 1
+  sleep 1
+done
+test "$health" = healthy
+test "$(docker exec "$container_id" id -u)" != 0
+```
 
 To enable it, mount a repository and pass the flag:
 
@@ -430,7 +488,7 @@ docker run --rm -p 127.0.0.1:4173:4173 \
   patchtrace:local
 ```
 
-Use `/repo` as the repository path. The container is still an operator-controlled environment, not a hardened sandbox; add network and resource restrictions appropriate to your setup.
+Use `/repo` as the repository path. The application image is an operator-controlled deployment, not a hardened sandbox. Production verification uses a separate constrained container with `--network=none`, a read-only source mount, a writable workspace volume, no added capabilities, a non-root UID:GID, CPU/memory/PID limits, and a bounded `/tmp`; configure the image locally before using `PATCHTRACE_VERIFY_ISOLATION=production`.
 
 ## Project layout
 
@@ -441,6 +499,7 @@ src/core/
   analysis.mjs           Validation, timeline, scoring, CSV/JUnit parsers
   git-adapter.mjs        Local repository history and enrichment
   verification.mjs       Temp-copy runner, timeouts, cleanup, safety checks
+  container-runner.mjs   Docker/Podman constrained verification runner
   report.mjs             JSON, Markdown, and CSV report rendering
   redaction.mjs          Best-effort secret redaction
   command-line.mjs       Test-command argv parsing
@@ -455,15 +514,15 @@ The core engine does not depend on the server or browser. `RepositoryAdapter`, `
 
 ## Current limits
 
-- Real verification uses a temporary copy, not a container/VM sandbox. A container/VM runner is a production requirement.
-- `dependencyImpact` is a provided signal; dependency blast-radius is not derived from a package graph.
+- Real verification defaults to a temporary copy for trusted local previews; production mode uses the constrained Docker/Podman runner and fails closed when its runtime or image is unavailable. A dedicated VM remains the stronger operational boundary.
+- `dependencyImpact` is provided explicitly or derived from supported manifest/lockfile changes and bounded diff churn; it is not a full source-level package-graph analysis.
 - Diff risk is derived from changed-line count, not a full semantic risk model.
 - There is no persistence or investigation history; JSON bundles and reports are the contract.
 - The UI is a single-user local surface, not a multi-user service.
-- API request/response schema validation and an OpenAPI document are not implemented; route-level docs exist.
-- Report metadata is not path-scrubbed.
-- Docker image and the GitHub Actions matrix are defined, but have not been validated on real runners in this workspace.
-- License and release metadata are not finalized.
+- Hand-written API request/response contracts cover the current local routes and are documented in `docs/openapi.yaml`; generated schema tooling is intentionally not included.
+- Report exports scrub absolute local paths, but repository-relative evidence and non-pattern secrets can remain; raw `/api/analyze` responses are not path-scrubbed.
+- Docker runtime validation depends on a Docker daemon; this workspace does not provide one. The Ubuntu CI job is the source of truth for build/runtime validation.
+- Public npm release metadata points at the configured GitHub repository and is MIT licensed. A release still requires a maintainer to publish the package and tag the version.
 
 ## Documentation
 

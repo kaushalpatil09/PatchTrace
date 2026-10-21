@@ -7,74 +7,76 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand-mark">P</div>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="topbar" aria-label="PatchTrace">
+      <div class="brand-mark" aria-hidden="true">P</div>
       <div>
         <div class="eyebrow">LOCAL INCIDENT ANALYSIS</div>
         <h1>PatchTrace</h1>
       </div>
       <div class="topbar-spacer"></div>
-      <div class="offline-pill"><span></span> Offline-first</div>
+      <div class="offline-pill" role="status" aria-label="Offline-first local mode"><span aria-hidden="true"></span> Offline-first</div>
     </header>
 
-    <main class="shell">
-      <section class="hero panel">
+    <main id="main-content" class="shell" tabindex="-1">
+      <section class="hero panel" aria-labelledby="hero-title">
         <div>
           <div class="eyebrow accent">INCIDENT → CHANGE</div>
-          <h2>Find the change worth investigating first.</h2>
+          <h2 id="hero-title">Find the change worth investigating first.</h2>
           <p>PatchTrace connects deployment timing, changed files, and failing tests into an inspectable suspect ranking. It is evidence, not a root-cause oracle.</p>
         </div>
         <div class="load-actions">
-          <button id="load-sample" class="primary-button">Load sample incident <span>↗</span></button>
-          <button id="load-bundle" class="secondary-button" type="button">Load incident bundle</button>
-          <input id="bundle-file" type="file" accept="application/json,.json" hidden>
+          <button id="load-sample" class="primary-button" type="button" aria-describedby="status">Load sample incident <span aria-hidden="true">↗</span></button>
+          <button id="load-bundle" class="secondary-button" type="button" aria-describedby="status" aria-controls="bundle-file">Load incident bundle</button>
+          <input id="bundle-file" type="file" accept="application/json,.json" aria-label="Choose a JSON incident bundle" hidden>
         </div>
       </section>
 
-      <section id="status" class="status-bar" aria-live="polite">Ready. Load the deterministic sample to begin.</section>
+      <section id="status" class="status-bar" role="status" aria-live="polite" aria-atomic="true">Ready. Load the deterministic sample to begin.</section>
 
-      <section id="workspace" class="workspace hidden">
+      <section id="workspace" class="workspace hidden" aria-hidden="true" aria-labelledby="workspace-title" tabindex="-1">
+        <h2 id="workspace-title" class="sr-only">Incident analysis workspace</h2>
         <div class="main-column">
-          <section class="panel incident-panel">
+          <section class="panel incident-panel" aria-labelledby="incident-heading">
             <div class="section-heading">
               <div>
                 <div class="eyebrow">CURRENT INVESTIGATION</div>
-                <h3 id="incident-title">—</h3>
+                <h3 id="incident-heading"><span id="incident-title">—</span></h3>
               </div>
               <div class="section-actions">
-                <div id="environment" class="tag">—</div>
-                <button id="download-analysis" class="small-button" type="button">Download JSON</button>
+                <div id="environment" class="tag" aria-label="Incident environment">—</div>
+                <button id="download-analysis" class="small-button" type="button" aria-describedby="status" disabled>Download JSON</button>
               </div>
             </div>
             <p id="incident-summary" class="muted">—</p>
             <p id="analysis-meta" class="analysis-meta">—</p>
-            <div id="timeline" class="timeline"></div>
+            <div id="timeline" class="timeline" role="list" aria-label="Incident timeline"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel" aria-labelledby="suspects-heading">
             <div class="section-heading">
               <div>
                 <div class="eyebrow">RANKED EVIDENCE</div>
-                <h3>Suspect changes</h3>
+                <h3 id="suspects-heading">Suspect changes</h3>
               </div>
               <div class="muted small">Deterministic score · 0–1</div>
             </div>
-            <div id="suspects" class="suspect-list"></div>
+            <div id="suspects" class="suspect-list" role="list" aria-label="Ranked suspect commits"></div>
           </section>
         </div>
 
-        <aside class="side-column">
-          <section id="detail-panel" class="panel detail-panel">
+        <aside class="side-column" aria-label="Investigation details">
+          <section id="detail-panel" class="panel detail-panel" aria-live="polite" aria-atomic="true" aria-labelledby="detail-heading">
             <div class="eyebrow">SELECT A SUSPECT</div>
-            <h3>Evidence details</h3>
+            <h3 id="detail-heading">Evidence details</h3>
             <p class="muted">Choose a ranked commit to inspect its supporting signals.</p>
           </section>
-          <section id="verification-panel" class="panel verification-panel hidden" aria-live="polite" tabindex="-1"></section>
+          <section id="verification-panel" class="panel verification-panel hidden" aria-label="Verification results" aria-live="polite" aria-atomic="true" tabindex="-1"></section>
         </aside>
       </section>
     </main>
 
-    <footer>PatchTrace prototype · local data only · no production actions</footer>
+    <footer role="contentinfo">PatchTrace prototype · local data only · no production actions</footer>
     <noscript>PatchTrace requires JavaScript and the local server. No data leaves this machine.</noscript>
     <script type="module" src="/app.js"></script>
   </body>

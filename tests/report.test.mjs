@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { analyzeIncident } from '../src/core/analysis.mjs';
 import { buildReport, renderCsv, renderMarkdown } from '../src/core/report.mjs';
 
@@ -89,6 +90,60 @@ test('redacts nested values under sensitive object keys', () => {
   assert.equal(report.analysis.metadata.nested.apiKey, '[redacted]');
   assert.equal(report.analysis.metadata.nested.authorization, '[redacted]');
   assert.ok(report.redaction.matches >= 7);
+});
+
+test('scrubs nested absolute and home-directory paths in every report export', () => {
+  const modified = structuredClone(analysis);
+  modified.metadata = {
+    nested: {
+      posixPath: '/tmp/patchtrace/private/evidence.log',
+      windowsPath: String.raw`C:\Users\Alice\checkout\private\evidence.log`,
+      uncPath: String.raw`\\server\share\checkout\private\evidence.log`,
+      homePath: `${homedir()}/patchtrace/private/evidence.log`,
+      relativePath: 'src/tax.ts'
+    },
+    note: 'Keep src/tax.ts as repository-relative evidence.'
+  };
+  modified.suspects[0].message = String.raw`Candidate at C:\Users\Alice\checkout\src\tax.ts`;
+
+  const report = buildReport({
+    analysis: modified,
+    provenance: {
+      nested: {
+        posixPath: '/var/tmp/patchtrace/provenance.json',
+        windowsPath: String.raw`D:\work\patchtrace\provenance.json`,
+        uncPath: String.raw`\\host\share\patchtrace\provenance.json`,
+        homePath: `~/patchtrace/${'provenance.json'}`,
+        relativePath: 'fixtures/sample-incident/manifest.json'
+      }
+    },
+    generatedAt: '2026-10-20T00:00:00Z'
+  });
+
+  const json = JSON.stringify(report);
+  for (const leaked of [
+    '/tmp/patchtrace/private/evidence.log',
+    String.raw`C:\Users\Alice\checkout\private\evidence.log`,
+    String.raw`\\server\share\checkout\private\evidence.log`,
+    `${homedir()}/patchtrace/private/evidence.log`,
+    '/var/tmp/patchtrace/provenance.json',
+    String.raw`D:\work\patchtrace\provenance.json`,
+    String.raw`\\host\share\patchtrace\provenance.json`
+  ]) {
+    assert.equal(json.includes(leaked), false, `report leaked ${leaked}`);
+  }
+  assert.match(json, /src\/tax\.ts/);
+  assert.match(json, /fixtures\/sample-incident\/manifest\.json/);
+  assert.ok(report.redaction.pathsScrubbed >= 8);
+
+  const markdown = renderMarkdown(report);
+  assert.equal(markdown.includes('/var/tmp/patchtrace/provenance.json'), false);
+  assert.equal(markdown.includes(String.raw`D:\work\patchtrace\provenance.json`), false);
+  assert.match(markdown, /fixtures\/sample-incident\/manifest\.json/);
+
+  const csv = renderCsv(modified);
+  assert.equal(csv.includes(String.raw`C:\Users\Alice\checkout\src\tax.ts`), false);
+  assert.match(csv, /\[path redacted\]/);
 });
 
 test('renders CSV and escapes commas and quotes', () => {

@@ -40,9 +40,9 @@ These controls reduce cross-site request forgery, DNS-rebinding, and drive-by br
 
 ## Real verification boundary
 
-The current runner is **best-effort isolation, not a sandbox**.
+The default `temp-copy` runner is **best-effort isolation, not a sandbox**. The opt-in production mode replaces command execution with a constrained Docker/Podman container; it is a stronger boundary, but the container runtime, image, and host remain operator-controlled.
 
-What it does:
+What the default `temp-copy` mode does:
 
 1. Resolves and inspects the repository before copying.
 2. Rejects linked worktrees, submodule checkouts, bare repositories, shallow clones, filesystem roots, dirty worktrees (uncommitted or untracked changes), and symlinks that resolve outside the repository.
@@ -57,15 +57,15 @@ What it does:
 11. Removes the temporary copy and reports cleanup failure separately from the test result.
 12. Sweeps marked `patchtrace-*` workspaces older than 24 hours at server/CLI verification startup so a crash does not leave them forever.
 
-What it does **not** do:
+The default `temp-copy` mode does **not**:
 
-- It does not prevent a malicious test command from reading or modifying files elsewhere on the machine.
-- It does not prevent network access.
-- It does not provide CPU, memory, filesystem, or syscall isolation.
-- It does not prove that a revert is safe or that a commit caused the incident.
+- Prevent a malicious test command from reading or modifying files elsewhere on the machine.
+- Prevent network access.
+- Provide CPU, memory, filesystem, or syscall isolation.
+- Prove that a revert is safe or that a commit caused the incident.
 - On Windows, `.cmd`/`.bat` launchers such as `npm` are invoked through `cmd.exe`. The caller does not build a shell string, but batch-file semantics still apply; prefer explicit argv JSON for unusual commands.
 
-Use a dedicated container or VM, a read-only repository mount where possible, a non-privileged user, and network isolation if you need a real security boundary. A container/VM runner is a production requirement listed in `PRODUCTION_READINESS.md`.
+Production container mode (`PATCHTRACE_VERIFY_ISOLATION=production`) fails closed unless Docker or Podman and the configured local image are available. Each phase runs in a fresh container with no network, a read-only source mount, a separate writable workspace, a non-root numeric identity, dropped capabilities, and bounded CPU, memory, PIDs, and `/tmp`. It never silently falls back to `temp-copy` mode. Use a dedicated VM when the container daemon or host itself is not trusted; a container is not a hardware boundary.
 
 ## Secrets and reports
 
@@ -73,7 +73,7 @@ Use a dedicated container or VM, a read-only repository mount where possible, a 
 - Do not enable verification on a server exposed to untrusted users.
 - Verification command output is redacted before it is returned, and the Markdown/CSV report renderers apply the same best-effort redaction to evidence and provenance text.
 - Report JSON from the CLI, the download button, and `POST /api/report` is deep-redacted with the same rules and records `redaction.matches`. Raw `/api/analyze` responses and analysis objects assembled outside the report builder remain raw data, not reports.
-- Local filesystem paths, repository names, and non-pattern secrets may still appear in report metadata; path scrubbing is not implemented. Treat all exports as sensitive and review them before sharing.
+- Report exports replace absolute local filesystem and home-directory paths, but repository-relative evidence, repository names or path fragments in messages, and non-pattern secrets may still appear. Treat all exports as sensitive and review them before sharing.
 - Redaction is pattern-based. It can miss unusual secret formats and can over-redact matching text. It is not a substitute for keeping credentials out of repositories and test output.
 
 ## Docker

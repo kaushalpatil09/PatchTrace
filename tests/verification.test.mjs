@@ -14,6 +14,7 @@ import {
   sweepStaleWorkspaces,
   verifyRollback
 } from '../src/core/verification.mjs';
+import { containerSettings, createContainerCommandRunner } from '../src/core/container-runner.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -368,4 +369,192 @@ test('cancels a run, terminates the child, and cleans up the temporary copy', as
   assert.equal(result.sourceUnchanged, true);
   assert.equal(result.cleanup.removed, true);
   assert.equal(result.candidate, null);
+});
+
+test('rejects root or malformed container identities', () => {
+  assert.throws(() => containerSettings({ user: '0:0' }), /non-root/);
+  assert.throws(() => containerSettings({ user: '00:1000' }), /non-root/);
+  assert.throws(() => containerSettings({ user: '65532:65532:1' }), /non-root/);
+  assert.throws(() => containerSettings({ user: 'not-a-user' }), /non-root/);
+  assert.equal(containerSettings({ user: '65532:65532' }).user, '65532:65532');
+});
+
+test('fails closed when production container runtime is unavailable', async (t) => {
+  const { root, sha } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const commandRunner = async (command) => {
+    calls.push(command);
+    return { status: 'error', exitCode: null, stdout: '', stderr: 'not found' };
+  };
+
+  const result = await verifyRollback({
+    repoPath: root,
+    candidateSha: sha,
+    testCommand: stateCommand,
+    isolation: 'container',
+    containerRuntime: 'docker',
+    commandRunner
+  });
+
+  assert.equal(result.status, 'unsupported');
+  assert.equal(result.outcome, 'unsupported');
+  assert.equal(result.reason, 'container_runtime_unavailable');
+  assert.match(result.message, /configured container runtime/);
+  assert.equal(result.baseline, null);
+  assert.equal(result.candidate, null);
+  assert.equal(result.cleanup.removed, false);
+  assert.equal(result.cleanup.skipped, true);
+  assert.equal(result.sourceUnchanged, true);
+  assert.deepEqual(calls, [['docker', '--version']]);
+});
+
+test('fails closed when the configured verification image is unavailable', async (t) => {
+  const { root, sha } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const commandRunner = async (command) => {
+    calls.push(command);
+    if (command[1] === '--version') {
+      return { status: 'passed', exitCode: 0, stdout: 'Docker version 27.0.0', stderr: '' };
+    }
+    return { status: 'failed', exitCode: 1, stdout: '', stderr: 'No such image' };
+  };
+
+  const result = await verifyRollback({
+    repoPath: root,
+    candidateSha: sha,
+    testCommand: stateCommand,
+    isolation: 'container',
+    containerRuntime: 'docker',
+    containerImage: 'missing:image',
+    commandRunner
+  });
+
+  assert.equal(result.status, 'unsupported');
+  assert.equal(result.outcome, 'unsupported');
+  assert.equal(result.reason, 'container_image_unavailable');
+  assert.match(result.message, /missing:image/);
+  assert.deepEqual(calls, [
+    ['docker', '--version'],
+    ['docker', 'image', 'inspect', 'missing:image']
+  ]);
+  assert.equal(result.baseline, null);
+  assert.equal(result.cleanup.removed, false);
+});
+
+test('requests container removal when a production command is cancelled', async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const commandRunner = async (command) => {
+    calls.push(command);
+    if (command[1] === 'run') {
+      controller.abort();
+      return { status: 'cancelled', exitCode: null, stdout: '', stderr: '' };
+    }
+    return { status: 'passed', exitCode: 0, stdout: '', stderr: '' };
+  };
+  const runContainer = createContainerCommandRunner({
+    runtime: 'docker',
+    image: 'fake:image',
+    sourcePath: '/source',
+    workspacePath: '/workspace',
+    commandRunner
+  });
+
+  const result = await runContainer(['node', '--version'], '/workspace', 5_000, { signal: controller.signal });
+
+  assert.equal(result.status, 'cancelled');
+  assert.ok(calls.some((command) => command[0] === 'docker' && command[1] === 'rm' && command[2] === '-f'));
+});
+
+test('runs every production verification phase through a constrained container command', async (t) => {
+  const { root, sha } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  let reverted = false;
+  const commandRunner = async (command) => {
+    calls.push(command);
+    if (command[1] === '--version') {
+      return { status: 'passed', exitCode: 0, stdout: 'Docker version 27.0.0', stderr: '' };
+    }
+    if (command[1] === 'image') {
+      return { status: 'passed', exitCode: 0, stdout: '[{}]', stderr: '' };
+    }
+    assert.equal(command[1], 'run');
+    const imageIndex = command.indexOf('fake:image');
+    const inner = command.slice(imageIndex + 1);
+    if (inner.includes('fake-test')) {
+      return {
+        status: reverted ? 'passed' : 'failed',
+        exitCode: reverted ? 0 : 1,
+        stdout: reverted ? 'good\n' : 'bad\n',
+        stderr: '',
+        redactions: 0,
+        timedOut: false,
+        cancelled: false
+      };
+    }
+    if (inner.includes('revert')) {
+      reverted = true;
+      return { status: 'passed', exitCode: 0, stdout: '', stderr: '', redactions: 0, timedOut: false };
+    }
+    return { status: 'passed', exitCode: 0, stdout: '', stderr: '', redactions: 0, timedOut: false };
+  };
+
+  const result = await verifyRollback({
+    repoPath: root,
+    candidateSha: sha,
+    testCommand: ['fake-test'],
+    timeoutMs: 5_000,
+    baselineRuns: 1,
+    isolation: 'production',
+    containerRuntime: 'docker',
+    containerImage: 'fake:image',
+    commandRunner
+  });
+
+  assert.equal(result.status, 'passed');
+  assert.equal(result.outcome, 'confirmed');
+  assert.equal(result.isolation, 'container');
+  assert.equal(result.isolationRequested, 'production');
+  assert.equal(result.containerRuntime, 'docker');
+  assert.equal(result.containerImage, 'fake:image');
+  assert.equal(result.sourceUnchanged, true);
+  assert.equal(result.cleanup.removed, true);
+  const runCalls = calls.filter((command) => command[1] === 'run');
+  assert.ok(runCalls.length >= 5);
+  for (const command of runCalls) {
+    assert.ok(command.includes('--network=none'));
+    assert.ok(command.includes('--read-only'));
+    assert.ok(command.includes('--cpus'));
+    assert.ok(command.includes('--memory'));
+    assert.ok(command.includes('--pids-limit'));
+    assert.ok(command.includes('--user'));
+    assert.match(command[command.indexOf('--user') + 1], /^[1-9]\d*:\d+$/);
+    assert.ok(command.some((part) => part.endsWith(':/patchtrace/source:ro')));
+    assert.ok(command.some((part) => part.endsWith(':/patchtrace/workspace:rw')));
+  }
+});
+
+test('rejects an oversized repository before creating a verification workspace', async (t) => {
+  const { root, sha } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const result = await verifyRollback({
+    repoPath: root,
+    candidateSha: sha,
+    testCommand: stateCommand,
+    maxRepositoryCopyBytes: 1,
+    minFreeBytes: 0
+  });
+
+  assert.equal(result.status, 'unsupported');
+  assert.equal(result.outcome, 'unsupported');
+  assert.equal(result.reason, 'repository_copy_too_large');
+  assert.ok(result.repositoryBytes > result.maxRepositoryCopyBytes);
+  assert.equal(result.baseline, null);
+  assert.equal(result.cleanup.removed, false);
+  assert.equal(result.cleanup.skipped, true);
+  assert.equal(result.sourceUnchanged, true);
 });

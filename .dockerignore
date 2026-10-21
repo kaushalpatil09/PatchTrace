@@ -1,5 +1,7 @@
 .git
 .gitignore
+.github
+.omnirush
 node_modules
 npm-debug.log*
 .env
@@ -14,3 +16,4 @@ AGENTS.md
 TODO.md
 opencode.jsonc
 *.log
+Dockerfile*

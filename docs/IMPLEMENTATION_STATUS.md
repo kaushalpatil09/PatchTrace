@@ -2,7 +2,7 @@
 
 This page records what is actually built, what is verified by tests, and what remains. It is not a substitute for the full production specification in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Implemented and tested
 
@@ -24,7 +24,11 @@ Last updated: 2026-10-20
 - `/api/health` reports Git availability/version, temporary-directory writability, readiness, and verification activity.
 - Parsers: quoted/BOM/CRLF CSV; bounded JUnit self-closing cases, skipped tests, namespaces, entities, single-quoted attributes, CDATA, strict nesting, and malformed-XML errors.
 - Scoring: timezone-mandatory timestamps, post-incident deployment exclusion, environment matching, candidate windows, short/full SHA deployment matching with ambiguity refusal, deployment commit lists, file-overlap/test-overlap separation, coverage-aware confidence, contribution breakdown, missing evidence, deterministic tie-breaking, and bounded why-not explanations.
-- Docker image binds `0.0.0.0` inside the container, installs Git, runs as the non-root `node` user, and has a healthcheck and `.dockerignore`.
+- Docker image uses a dependency/runtime multi-stage build, binds `0.0.0.0` inside the container, installs Git and CA certificates, runs as the non-root `node` user, and has a readiness-aware healthcheck and `.dockerignore`.
+- CLI `doctor` reports local analysis readiness separately from container runtime/image readiness, exposes `productionReady`/`containerRequired`, and fails strictly when `--strict-container` or production isolation requires an unavailable image/runtime.
+- Public npm metadata points to the configured GitHub remote, removes the private publication block, declares MIT licensing, and curates the package contents.
+- Browser accessibility baseline: skip link, semantic landmarks, labels, live regions, focus handling, keyboard-safe native controls, responsive/zoom behavior, reduced motion, forced-colors/high-contrast fallbacks, and static regression checks.
+- Resource and operational guidance covers body/input limits, parser and collection bounds, Git enrichment limits, verification budgets, Docker resources, readiness semantics, and release gates.
 
 ### Real vertical slice (M1, substantial)
 
@@ -44,16 +48,15 @@ Last updated: 2026-10-20
 
 ### Before calling this production-ready
 
-- **Container/VM sandbox** for verification. The current temp-copy runner is best-effort isolation, not a security boundary.
-- **Complete API request/response schema validation** beyond the report request contract, and an OpenAPI document. Route-level docs exist in `docs/API.md`.
-- **Dependency blast-radius derivation** from a package graph. `dependencyImpact` is currently manual; Git enrichment only derives `diffRisk`.
+- **Live container/VM operational validation** for verification. The constrained Docker/Podman runner and fail-closed result contract are implemented; a real daemon/image run and a dedicated VM audit remain deployment gates.
+- **Generated API schema tooling** beyond the dependency-free hand-written route contracts. OpenAPI 3.1 is checked in at `docs/openapi.yaml` and route-level docs exist in `docs/API.md`.
+- **Full source-level package-graph analysis** remains deferred. Current Git enrichment derives a transparent dependency-impact heuristic from supported manifests/lockfiles and bounded diff churn; explicit values remain labeled as provided.
 - **CI matrix execution/validation** on real GitHub runners. The workflow is checked in, but this environment cannot execute GitHub Actions.
 - **Large-repository and slow-command performance tests.** A synthetic bundle at the documented collection limits is covered; repository copying/enrichment at scale is not.
 - **Persistence and investigation history** are intentionally not implemented; JSON bundles/reports are the current contract.
-- **Path scrubbing in report metadata.** Report JSON, Markdown, and CSV are redacted, but local filesystem paths and repository names are not scrubbed. Raw `/api/analyze` responses are not report exports.
-- **Accessibility audit** with a browser/AT; keyboard support and labels are in place, but this needs real testing.
-- **License and release metadata** decisions.
-- **Docker build/runtime validation.** Docker is unavailable in this environment; the Dockerfile is not built here.
+- **Path scrubbing in raw analysis responses.** Report JSON, Markdown, and CSV scrub absolute local paths while preserving repository-relative evidence. Raw `/api/analyze` responses remain sensitive data.
+- **Accessibility audit** with a browser/AT; the static baseline and keyboard/zoom semantics are in place, but this needs real assistive-technology testing.
+- **Docker build/runtime validation.** Docker is unavailable in this environment; the Ubuntu CI job is the executable build/runtime gate.
 
 ### Deliberately out of scope for the first version
 
@@ -65,7 +68,8 @@ Last updated: 2026-10-20
 npm ci
 npm test
 npm run smoke
-node bin/patchtrace.mjs doctor --json
+npm run doctor -- --json
+npm run security
 ```
 
-The test suite covers analysis, bounded parsers, scoring regressions, short/full SHA matching, why-not explanations, API security, report request validation, bundle validation, Git enrichment, ingestion, report rendering, JSON report redaction, injection escaping, CLI behavior, UI static wiring, API report generation, temporary-copy verification, absolute-link source-integrity rejection, dirty-worktree rejection, worktree rejection, path-escape detection, verification concurrency and cancellation, flaky-baseline detection, stale-workspace sweeping, output redaction, bundle collection limits including a synthetic maximum-size analysis/report run, and the Windows `npm` launcher path. The current suite has 87 tests across 12 files.
+The test suite covers analysis, bounded parsers, scoring regressions, short/full SHA matching, derived dependency impact, why-not explanations, API security/contracts, report request validation, bundle validation, Git enrichment limits, ingestion, report rendering, path scrubbing and JSON redaction, injection escaping, CLI behavior, UI accessibility/static wiring, API report generation, temporary-copy verification, container preflight behavior, absolute-link source-integrity rejection, dirty-worktree rejection, worktree rejection, path-escape detection, verification concurrency and cancellation, flaky-baseline detection, stale-workspace sweeping, output redaction, bundle collection limits including a synthetic maximum-size analysis/report run, and the Windows `npm` launcher path. `npm run test:coverage` is available as an on-demand Node built-in coverage path; no percentage is claimed without running and reviewing it.

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { analyzeIncident, validateIncident } from '../src/core/analysis.mjs';
 import { parseTestCommand } from '../src/core/command-line.mjs';
+import { prepareContainerRuntime } from '../src/core/container-runner.mjs';
 import { enrichIncidentFromRepository } from '../src/core/git-adapter.mjs';
 import { buildIngestedBundle } from '../src/core/ingestion.mjs';
 import { buildReport, renderCsv, renderMarkdown } from '../src/core/report.mjs';
@@ -27,7 +28,7 @@ function usage() {
   return `PatchTrace ${VERSION}
 
 Usage:
-  patchtrace doctor [--json]
+  patchtrace doctor [--json] [--strict-container]
   patchtrace validate <bundle.json> [--json]
   patchtrace ingest <bundle.json> --out <bundle.json> [--repo <path>] [--deployments <csv>] [--junit <xml>] [--incident-start <timestamp>] [--environment <name>]
   patchtrace analyze <bundle.json> [--repo <path>] [--json] [--out <file>] [--format human|json|markdown|csv]
@@ -39,8 +40,9 @@ Bundle input:
   - schema: docs/INCIDENT_BUNDLE.md
 
 Verification:
-  - real verification is a local, best-effort temporary-copy check
-  - it is not a sandbox and does not prove root cause
+  - default verification is a local, best-effort temporary-copy check
+  - set PATCHTRACE_VERIFY_ISOLATION=production to require the constrained container runner
+  - neither mode proves root cause; container readiness is reported by doctor
 
 Exit codes:
   0 success/confirmed   1 not confirmed   2 invalid input   3 timeout   4 command error
@@ -172,7 +174,15 @@ function humanVerification(result) {
 }
 
 async function commandDoctor(args) {
-  const parsed = parseArgs({ args, allowPositionals: false, options: { json: { type: 'boolean' }, help: { type: 'boolean' } } });
+  const parsed = parseArgs({
+    args,
+    allowPositionals: false,
+    options: {
+      json: { type: 'boolean' },
+      'strict-container': { type: 'boolean' },
+      help: { type: 'boolean' }
+    }
+  });
   if (parsed.values.help) {
     process.stdout.write(usage());
     return 0;
@@ -206,15 +216,58 @@ async function commandDoctor(args) {
     tempDetail = error.message;
   }
   checks.push({ name: 'temporary workspace', ok: tempOk, detail: tempDetail });
-  const ok = checks.every((check) => check.ok);
+
+  let container;
+  try {
+    const prepared = await prepareContainerRuntime({
+      commandRunner: runCommand,
+      cwd: process.cwd(),
+      timeoutMs: 10_000
+    });
+    container = {
+      ready: true,
+      status: 'ready',
+      runtimeReady: true,
+      imageReady: true,
+      runtime: prepared.runtime,
+      image: prepared.image,
+      version: prepared.version || null,
+      detail: `${prepared.runtime} can inspect ${prepared.image}.`
+    };
+  } catch (error) {
+    container = {
+      ready: false,
+      status: 'unavailable',
+      runtimeReady: error.code !== 'container_runtime_unavailable',
+      imageReady: false,
+      runtime: error.details?.runtime ?? process.env.PATCHTRACE_CONTAINER_RUNTIME ?? null,
+      image: error.details?.image ?? process.env.PATCHTRACE_VERIFY_IMAGE ?? 'patchtrace:local',
+      code: error.code || 'container_unavailable',
+      detail: error.message || 'No usable container runtime and verification image were found.'
+    };
+  }
+
+  const localReady = checks.every((check) => check.ok);
+  const containerRequired = Boolean(parsed.values['strict-container']
+    || process.env.PATCHTRACE_VERIFY_ISOLATION === 'production');
+  // Container verification is a separate capability during normal local
+  // analysis, but a requested production gate must fail closed when it is not
+  // ready. This keeps the default doctor useful without implying isolation.
+  const productionReady = localReady && container.ready;
+  const ok = localReady && (!containerRequired || container.ready);
 
   if (parsed.values.json) {
-    printJson({ schemaVersion: 1, ok, version: VERSION, checks });
+    printJson({ schemaVersion: 1, ok, productionReady, containerRequired, version: VERSION, checks, container });
   } else {
     for (const check of checks) {
       process.stdout.write(`${check.ok ? 'ok' : 'FAIL'}  ${check.name}: ${check.detail}\n`);
     }
-    process.stdout.write(ok ? 'doctor: ready\n' : 'doctor: problems found\n');
+    process.stdout.write(`${container.ready ? 'ok' : 'WARN'}  container runtime/image: ${container.detail}\n`);
+    process.stdout.write(ok
+      ? (container.ready ? 'doctor: ready\n' : 'doctor: ready for local analysis; container verification is unavailable\n')
+      : containerRequired && !container.ready
+        ? 'doctor: problems found (container verification is unavailable)\n'
+        : 'doctor: problems found\n');
   }
   return ok ? 0 : 1;
 }

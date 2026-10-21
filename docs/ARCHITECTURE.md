@@ -83,13 +83,13 @@ Confidence is deliberately conservative: high confidence requires both a high sc
 - Command output is capped and best-effort redacted before it leaves the runner. Report exports apply the same best-effort rules to nested strings.
 - Source safety is checked before and after a run; a changed source invalidates a successful result.
 - Real repository verification is disabled unless `PATCHTRACE_ENABLE_VERIFY=1`.
-- The temporary-copy runner is **best-effort isolation, not a sandbox**. A dedicated container/VM runner is a production requirement.
+- The default temporary-copy runner is **best-effort isolation, not a sandbox**. Production mode uses a constrained Docker/Podman runner and fails closed when its runtime or image is unavailable; a dedicated VM remains the stronger boundary.
 
 ## Extension points
 
 - `RepositoryAdapter`: currently `src/core/git-adapter.mjs`.
 - `ArtifactParser`: CSV and JUnit parsers in `analysis.mjs`; add parsers behind the same normalized shapes.
-- `VerificationRunner`: currently temp-copy; replace with a container/VM runner behind the same result contract.
+- `VerificationRunner`: temp-copy by default, with a constrained Docker/Podman runner for production mode; a native VM backend remains an extension point.
 - `ReportRenderer`: `src/core/report.mjs`.
 
 ## Technical trade-off

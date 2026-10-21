@@ -71,9 +71,13 @@ Times must be ISO 8601 **with a timezone** (`Z` or `+02:00`). A timestamp withou
 | `timestamp` | yes | timestamp | Commit time with timezone. |
 | `message` | yes | string | Commit subject. |
 | `changedFiles` | no | string[] | Repository-relative paths. Used for file and test overlap. |
-| `diffRisk` | no | 0–1 | Manual diff-size/risk signal. Missing means the signal is unavailable. |
+| `diffRisk` | no | 0–1 | Manual diff-size/risk signal, or the value derived by `--repo` enrichment. Missing means unavailable. |
 | `diffRiskSource` | no | string | `derived:git` when supplied by `--repo` enrichment. |
-| `dependencyImpact` | no | 0–1 | Manual blast-radius signal. Missing means unavailable. |
+| `dependencyImpact` | no | 0–1 | Explicit blast-radius signal, or the value derived from supported dependency files. Missing means unavailable. |
+| `dependencyImpactSource` | no | string | `provided` or `derived:dependency-files`. |
+| `dependencyImpactDetails` | no | object | Inspectable dependency derivation inputs and component signals. |
+| `diffLines` | no | number | Total changed lines observed for the commit by Git enrichment. |
+| `diffStats` | no | object[] | Per-file additions, deletions, and changed-line counts used for dependency and risk evidence. |
 
 File matching normalizes `\` to `/`, but paths should be repository-relative.
 

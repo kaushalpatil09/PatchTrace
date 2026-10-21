@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { analyzeIncident } from '../src/core/analysis.mjs';
-import { createPatchTraceServer } from '../server.mjs';
+import { createPatchTraceServer, validateApiRequest, validateApiResponse } from '../server.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -49,6 +49,19 @@ test('rejects unauthenticated API requests', async () => {
   assert.equal(response.status, 401);
   const body = await response.json();
   assert.equal(body.error.code, 'unauthorized');
+});
+
+test('validates shared API request and response contracts', async () => {
+  assert.equal(validateApiRequest('analyze', fixture).valid, true);
+  assert.equal(validateApiRequest('verify', { analysis: {}, sha: 'a81e7c2' }).valid, true);
+  assert.equal(validateApiRequest('verify', { repoPath: '', sha: 'not-a-sha' }).valid, false);
+  assert.equal(validateApiRequest('cancel', {}).valid, true);
+
+  const health = await fetch(`${base}/api/health`);
+  const healthBody = await health.json();
+  assert.equal(validateApiResponse('health', healthBody).length, 0);
+  assert.equal(validateApiResponse('cancel', { cancelled: true }).length, 0);
+  assert.ok(validateApiResponse('verify', { source: 'fixture' }).length > 0);
 });
 
 test('serves the sample with a session cookie', async () => {
@@ -118,6 +131,43 @@ test('rejects invalid JSON and invalid bundles with safe errors', async () => {
   const body = await invalidBundle.json();
   assert.equal(body.error.code, 'invalid_bundle');
   assert.ok(body.error.details.length > 0);
+});
+
+test('scrubs filesystem paths from API error details', async (t) => {
+  const secretPath = String.raw`C:\Users\Alice\checkout\missing-repository`;
+  const errorApp = createPatchTraceServer({
+    token: 'error-path-token',
+    enableRealVerification: true,
+    runVerification: async () => {
+      throw new Error(`verification failed at ${secretPath}`);
+    }
+  });
+  await new Promise((resolve) => errorApp.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise((resolve) => errorApp.server.close(resolve));
+  });
+
+  const response = await fetch(`http://127.0.0.1:${errorApp.server.address().port}/api/verify`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer error-path-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ repoPath: '/unused', sha: 'a81e7c2', testCommand: ['node', '--version'] })
+  });
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.apiVersion, 1);
+  assert.equal(body.error.code, 'verification_error');
+  assert.equal(JSON.stringify(body).includes(secretPath), false);
+  assert.equal(body.error.message, 'Repository verification could not be completed.');
+
+  const invalidPath = '/tmp/patchtrace private path/incident';
+  const invalidBundle = await fetch(`${base}/api/analyze`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...fixture, incidentStart: invalidPath })
+  });
+  assert.equal(invalidBundle.status, 400);
+  const invalidBody = await invalidBundle.json();
+  assert.equal(JSON.stringify(invalidBody).includes(invalidPath), false);
 });
 
 test('rejects oversized declared bodies', async () => {

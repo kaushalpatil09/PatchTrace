@@ -38,6 +38,7 @@ function setStatus(message, kind = '') {
   const status = $('#status');
   status.textContent = message;
   status.dataset.kind = kind;
+  status.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
 }
 
 async function responseError(response, fallback) {
@@ -78,6 +79,7 @@ async function analyzeBundle(bundle, label, text = '') {
   state.selectedSha = state.analysis.suspects[0]?.sha ?? null;
   resetVerification();
   render();
+  $('#workspace')?.focus({ preventScroll: true });
   setStatus(`${label} analyzed. Every ranking signal is inspectable below.`);
 }
 
@@ -137,9 +139,11 @@ async function loadBundleFile(file) {
 function render() {
   const { incident, timeline, suspects, warnings, candidateWindowMinutes, excludedCandidateCount } = state.analysis;
   $('#workspace').classList.remove('hidden');
+  $('#workspace').setAttribute('aria-hidden', 'false');
   $('#incident-title').textContent = incident.title;
   $('#incident-summary').textContent = incident.summary || 'No summary provided.';
   $('#environment').textContent = incident.environment;
+  $('#download-analysis').disabled = false;
   $('#analysis-meta').textContent = [
     `Window: ${candidateWindowMinutes} minutes`,
     `${excludedCandidateCount} commit${excludedCandidateCount === 1 ? '' : 's'} excluded`,
@@ -147,7 +151,7 @@ function render() {
   ].join(' · ');
 
   $('#timeline').innerHTML = timeline.map((event) => `
-    <div class="timeline-item">
+    <div class="timeline-item" role="listitem">
       <div class="timeline-time"><span class="timeline-date">${escapeHtml(formatDate(event.timestamp))}</span><span class="timeline-clock">${escapeHtml(formatClock(event.timestamp))}</span><span class="timeline-zone">UTC</span></div>
       <div class="timeline-node"></div>
       <div class="timeline-content">
@@ -158,26 +162,32 @@ function render() {
     </div>`).join('');
 
   $('#suspects').innerHTML = suspects.map((suspect, index) => `
-    <button type="button" class="suspect ${suspect.sha === state.selectedSha ? 'selected' : ''}"
-      data-sha="${escapeHtml(suspect.sha)}" aria-pressed="${suspect.sha === state.selectedSha}">
-      <span class="rank">${rankLabel(index)}</span>
-      <span class="suspect-main">
-        <span class="commit-sha">${escapeHtml(suspect.sha)}</span>
-        <span class="commit-message">${escapeHtml(suspect.message)}</span>
-        <span class="commit-files">${escapeHtml((suspect.changedFiles || []).join(' · '))}</span>
-      </span>
-      <span class="score">
-        <span class="score-value">${Number(suspect.score).toFixed(2)}</span>
-        <span class="confidence ${escapeHtml(suspect.confidence)}">${escapeHtml(suspect.confidence)}</span>
-        <span class="coverage">${percent(suspect.coverage)} coverage</span>
-      </span>
-    </button>`).join('');
+    <div role="listitem">
+      <button type="button" class="suspect ${suspect.sha === state.selectedSha ? 'selected' : ''}"
+        data-sha="${escapeHtml(suspect.sha)}" aria-pressed="${suspect.sha === state.selectedSha}"
+        aria-label="Inspect suspect ${escapeHtml(suspect.sha)}: ${escapeHtml(suspect.message)}">
+        <span class="rank" aria-hidden="true">${rankLabel(index)}</span>
+        <span class="suspect-main">
+          <span class="commit-sha">${escapeHtml(suspect.sha)}</span>
+          <span class="commit-message">${escapeHtml(suspect.message)}</span>
+          <span class="commit-files">${escapeHtml((suspect.changedFiles || []).join(' · '))}</span>
+        </span>
+        <span class="score">
+          <span class="score-value">${Number(suspect.score).toFixed(2)}</span>
+          <span class="confidence ${escapeHtml(suspect.confidence)}">${escapeHtml(suspect.confidence)}</span>
+          <span class="coverage">${percent(suspect.coverage)} coverage</span>
+        </span>
+      </button>
+    </div>`).join('');
 
   document.querySelectorAll('.suspect').forEach((element) => {
     element.addEventListener('click', () => {
       state.selectedSha = element.dataset.sha;
       resetVerification();
       render();
+      [...document.querySelectorAll('.suspect')]
+        .find((candidate) => candidate.dataset.sha === state.selectedSha)
+        ?.focus({ preventScroll: true });
       setStatus('Showing evidence for the selected candidate.');
     });
   });
@@ -185,7 +195,7 @@ function render() {
   if (!suspects.length) {
     $('#detail-panel').innerHTML = `
       <div class="eyebrow">NO CANDIDATES</div>
-      <h3>No candidate commits</h3>
+      <h3 id="detail-heading">No candidate commits</h3>
       <p class="muted">No commit fell inside the analysis window. Widen the window or check the incident timestamps.</p>`;
     if (warnings.length) {
       $('#detail-panel').insertAdjacentHTML('beforeend', `
@@ -259,7 +269,7 @@ function renderDetails(suspect) {
       <div class="commit-sha">${escapeHtml(suspect.sha)}</div>
       <div class="confidence ${escapeHtml(suspect.confidence)}">${escapeHtml(suspect.confidence)} confidence</div>
     </div>
-    <div class="detail-message">${escapeHtml(suspect.message)}</div>
+    <h3 id="detail-heading" class="detail-message">${escapeHtml(suspect.message)}</h3>
     <div class="coverage-line">
       <strong>${percent(suspect.coverage)}</strong> evidence coverage
       ${(suspect.missingSignals || []).length
@@ -306,15 +316,15 @@ function renderDetails(suspect) {
       <div class="real-verify-block">
         <div class="eyebrow">REAL REPOSITORY VERIFICATION</div>
         <p class="muted small">Runs in a temporary copy, reverts only that copy, and compares the baseline and candidate test runs. This is not a sandbox.</p>
-        <label class="field">Repository path
-          <input id="repo-path" name="repo-path" type="text" placeholder="D:\\path\\to\\repository" autocomplete="off" spellcheck="false">
-        </label>
-        <label class="field">Test command
-          <input id="test-command" name="test-command" type="text" value="npm test" autocomplete="off" spellcheck="false">
-        </label>
-        <label class="field">Per-run timeout (ms)
-          <input id="verify-timeout" name="verify-timeout" type="number" min="1" max="600000" value="30000">
-        </label>
+         <label class="field" for="repo-path">Repository path
+           <input id="repo-path" name="repo-path" type="text" placeholder="D:\\path\\to\\repository" autocomplete="off" spellcheck="false">
+         </label>
+         <label class="field" for="test-command">Test command
+           <input id="test-command" name="test-command" type="text" value="npm test" autocomplete="off" spellcheck="false">
+         </label>
+         <label class="field" for="verify-timeout">Per-run timeout (ms)
+           <input id="verify-timeout" name="verify-timeout" type="number" min="1" max="600000" value="30000">
+         </label>
         <button id="real-verify-button" class="verify-button secondary" type="button">Run real verification</button>
         <p id="real-verify-error" class="warning hidden" role="alert"></p>
       </div>` : ''}`;
@@ -336,7 +346,7 @@ async function verifyFixture(sha) {
   }
   panel.innerHTML = `
     <div class="eyebrow">SAMPLE VERIFICATION</div>
-    <h3>Reading fixture verification…</h3>
+    <h3 id="verification-heading">Reading fixture verification…</h3>
     <p class="muted">The demo compares stored baseline and candidate results. No repository is executed.</p>`;
   try {
     const response = await fetch('/api/verify', {
@@ -351,7 +361,7 @@ async function verifyFixture(sha) {
   } catch (error) {
     panel.innerHTML = `
       <div class="eyebrow">SAMPLE VERIFICATION UNAVAILABLE</div>
-      <p class="warning">${escapeHtml(error.message || 'Verification could not be completed.')}</p>`;
+      <p class="warning" role="alert">${escapeHtml(error.message || 'Verification could not be completed.')}</p>`;
   } finally {
     if (button) {
       button.disabled = false;
@@ -464,7 +474,7 @@ async function verifyReal(sha) {
     const startedAt = Date.now();
     panel.innerHTML = `
       <div class="eyebrow">REAL VERIFICATION</div>
-      <h3>Copying and testing…</h3>
+      <h3 id="verification-heading">Copying and testing…</h3>
       <p class="muted">The source repository is not used as the command working directory. The temporary copy is removed when the run finishes.</p>
       <p id="verification-elapsed" class="muted small" aria-live="off">Elapsed: 0s</p>
       <button id="cancel-verification" class="verify-button secondary" type="button">Cancel verification</button>`;
@@ -493,7 +503,7 @@ async function verifyReal(sha) {
       }
       panel.innerHTML = `
         <div class="eyebrow">REAL VERIFICATION UNAVAILABLE</div>
-        <p class="warning">${escapeHtml(error.message || 'Verification could not be started.')}</p>`;
+        <p class="warning" role="alert">${escapeHtml(error.message || 'Verification could not be started.')}</p>`;
     }
   } finally {
     clearInterval(elapsedTimer);
@@ -533,7 +543,7 @@ function renderVerificationResult(result, panel) {
 
   panel.innerHTML = `
     <div class="eyebrow">${fixture ? 'SAMPLE VERIFICATION COMPLETE' : cancelled ? 'REAL VERIFICATION CANCELLED' : 'REAL VERIFICATION COMPLETE'}</div>
-    <h3>${cancelled ? 'Verification cancelled' : positive ? 'Rollback hypothesis supported' : 'Rollback hypothesis not confirmed'}</h3>
+    <h3 id="verification-heading">${cancelled ? 'Verification cancelled' : positive ? 'Rollback hypothesis supported' : 'Rollback hypothesis not confirmed'}</h3>
     <p class="muted">${escapeHtml(result.message || (cancelled ? 'The run was cancelled and its temporary copy was cleaned up.' : ''))}</p>
     <div class="verify-result">
       <div class="result-card">
@@ -555,8 +565,8 @@ function renderVerificationResult(result, panel) {
       ${result.sourceUnchanged !== undefined ? `<span>Source unchanged: ${result.sourceUnchanged ? 'yes' : 'no'}</span>` : ''}
       ${result.durationMs !== undefined && result.durationMs !== null ? `<span>Duration: ${Math.round(Number(result.durationMs) / 1000)}s</span>` : ''}
     </div>
-    ${result.sourceUnchanged === false ? '<p class="warning">The source repository changed during verification. This result cannot be trusted.</p>' : ''}
-    ${result.cleanup?.removed === false && !result.cleanup.skipped ? `<p class="warning">Temporary workspace cleanup failed: ${escapeHtml(result.cleanup.error || 'unknown error')}</p>` : ''}
+    ${result.sourceUnchanged === false ? '<p class="warning" role="alert">The source repository changed during verification. This result cannot be trusted.</p>' : ''}
+    ${result.cleanup?.removed === false && !result.cleanup.skipped ? `<p class="warning" role="alert">Temporary workspace cleanup failed: ${escapeHtml(result.cleanup.error || 'unknown error')}</p>` : ''}
     ${outputBlock(baseline)}${outputBlock(candidate)}
     <p class="verify-note">${fixture
       ? 'This is fixture evidence, not a live test run and not proof of root cause.'
