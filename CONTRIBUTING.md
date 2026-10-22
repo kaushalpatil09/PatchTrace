@@ -22,13 +22,13 @@ npm run check
 npm run test:coverage
 ```
 
-The coverage command uses Node's built-in instrumentation; report the command as run only when its output has actually been collected. `npm run security` audits the dependency graph and should be run with the normal npm registry access available.
+The coverage command uses Node's built-in instrumentation; report the command as run only when its output has actually been collected. `npm run security` runs the lockfile-based `npm audit --package-lock-only --omit=dev --audit-level=high` gate and requires access to the configured npm registry's current advisory data.
 
 ## Rules
 
 - Keep `src/core/` framework-independent; analysis must work without the web server.
 - Do not mutate a source repository during verification or tests.
-- Never execute a command without a timeout and an explicit boundary. The current runner is best-effort temporary-copy isolation, not a sandbox.
+- Never execute a command without a timeout and an explicit boundary. The current default runner is trusted-local best-effort temporary-copy execution, not a sandbox.
 - Treat bundles and parser input as untrusted. Validate before scoring or rendering.
 - Prefer evidence and uncertainty labels over confident root-cause claims.
 - Keep external integrations out of the current product scope.
@@ -48,4 +48,4 @@ Windows works without nvm or a POSIX shell. Use the plain `node` commands above.
 
 Build and run the image as the non-root `node` user, then verify `/api/health` and the Docker health state before publishing an image. The GitHub Actions `docker` job performs those checks on Ubuntu; this repository does not assume Docker is installed on every contributor workstation.
 
-The package is MIT licensed and configured for public npm distribution. Keep release artifacts reproducible with `npm ci --ignore-scripts`, `npm test`, `npm run smoke`, `npm run security`, and the doctor check. Do not claim a Docker, coverage, or remote CI result unless that check actually ran.
+The package is MIT licensed and configured for public npm distribution. `npm run check:release` combines `npm ci --ignore-scripts`, the local `check` gate, and the lockfile-based audit. The lockfile makes installation reproducible; npm audit results remain dependent on the advisory database available from the configured registry. Do not claim a Docker, coverage, audit, or remote CI result unless that check actually ran.

@@ -189,9 +189,9 @@ test('accepts a directory link that resolves to the repository root', async (t) 
   await assert.doesNotReject(() => assertSupportedRepository(alias));
 });
 
-test('resolves and runs npm through the Windows command wrapper', async () => {
+test('resolves and runs npm through the Windows executable resolver', async () => {
   if (process.platform === 'win32') {
-    assert.match(resolveCommand('npm'), /\.(cmd|bat)$/i);
+    assert.match(resolveCommand('npm'), /\.(cmd|bat|exe)$/i);
   }
   const result = await runCommand(['npm', '--version'], process.cwd(), 15_000);
   assert.equal(result.status, 'passed');
@@ -441,6 +441,46 @@ test('fails closed when the configured verification image is unavailable', async
   ]);
   assert.equal(result.baseline, null);
   assert.equal(result.cleanup.removed, false);
+});
+
+test('reports an unavailable container daemon separately from a missing image', async (t) => {
+  const { root, sha } = await createRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls = [];
+  const commandRunner = async (command) => {
+    calls.push(command);
+    if (command[1] === '--version') {
+      return { status: 'passed', exitCode: 0, stdout: 'Docker version 27.0.0', stderr: '' };
+    }
+    return {
+      status: 'failed',
+      exitCode: null,
+      stdout: '',
+      stderr: 'Cannot connect to the Docker daemon at npipe:////./pipe/dockerDesktopLinuxEngine.'
+    };
+  };
+
+  const result = await verifyRollback({
+    repoPath: root,
+    candidateSha: sha,
+    testCommand: stateCommand,
+    isolation: 'container',
+    containerRuntime: 'docker',
+    containerImage: 'patchtrace:local',
+    commandRunner
+  });
+
+  assert.equal(result.status, 'unsupported');
+  assert.equal(result.outcome, 'unsupported');
+  assert.equal(result.reason, 'container_daemon_unavailable');
+  assert.match(result.message, /daemon is unavailable/i);
+  assert.deepEqual(calls, [
+    ['docker', '--version'],
+    ['docker', 'image', 'inspect', 'patchtrace:local']
+  ]);
+  assert.equal(result.baseline, null);
+  assert.equal(result.cleanup.removed, false);
+  assert.equal(result.sourceUnchanged, true);
 });
 
 test('requests container removal when a production command is cancelled', async () => {

@@ -40,6 +40,15 @@ test('the UI renders evidence source references and bounded why-not details safe
   assert.match(javascript, /escapeHtml\(reason\)/);
 });
 
+test('the UI exposes the effective verification mode and boundary without overstating isolation', () => {
+  assert.match(javascript, /isolationBoundary/);
+  assert.match(javascript, /trusted-local temporary copy; best-effort boundary only, not a security sandbox/);
+  assert.match(javascript, /constrained Docker\/Podman mode was requested but not established/);
+  assert.match(javascript, /never falls back to temp-copy/);
+  assert.match(javascript, /The server reports the effective boundary for each run/);
+  assert.match(javascript, /Mode: \$\{escapeHtml\(isolation\)\}/);
+});
+
 test('the UI exposes landmarks, labels, live regions, and keyboard-safe controls', () => {
   assert.match(html, /class="skip-link" href="#main-content"/);
   assert.match(html, /<header[^>]*aria-label="PatchTrace"/);

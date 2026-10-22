@@ -38,12 +38,28 @@ test('normalizes overrides and merges parser output without mutating the source'
   assert.deepEqual(input, { title: 'Import test', commits: [] });
   assert.equal(result.bundle.schemaVersion, 1);
   assert.equal(result.bundle.deployments[0].environment, 'production');
-  assert.equal(result.bundle.tests[0].timestamp, '2026-10-20T14:09:00Z');
+  assert.equal(Object.hasOwn(result.bundle.tests[0], 'timestamp'), false);
   assert.equal(result.bundle.tests[0].relatedFiles[0], 'src/tax.ts');
   assert.equal(result.bundle.provenance.ingestion.parserVersion, '1');
   assert.equal(result.bundle.provenance.ingestion.artifacts.length, 2);
   assert.match(result.bundle.provenance.ingestion.artifacts[0].sha256, /^[0-9a-f]{64}$/);
   assert.equal(result.provenance.repository, undefined);
+});
+
+test('preserves only timestamps supplied by JUnit and leaves absent relatedFiles missing', async () => {
+  const result = await buildIngestedBundle({
+    title: 'JUnit provenance',
+    environment: 'production',
+    incidentStart: '2026-10-20T14:09:00Z',
+    commits: []
+  }, {
+    junitXml: '<testsuite><testcase name="untimed"><failure message="missing time"/></testcase><testcase name="timed" timestamp="2026-10-20T14:10:00Z"/></testsuite>'
+  });
+
+  assert.equal(Object.hasOwn(result.bundle.tests[0], 'timestamp'), false);
+  assert.equal(Object.hasOwn(result.bundle.tests[0], 'relatedFiles'), false);
+  assert.equal(result.bundle.tests[1].timestamp, '2026-10-20T14:10:00Z');
+  assert.equal(Object.hasOwn(result.bundle.tests[1], 'relatedFiles'), false);
 });
 
 test('enriches imported bundles from the repository adapter', async (t) => {

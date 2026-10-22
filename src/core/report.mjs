@@ -94,8 +94,7 @@ export function buildReport({
 
 export function renderMarkdown(report) {
   if (!report?.analysis) throw new Error('A report with analysis is required.');
-  const safeReport = redactAndScrubDeep(report).value;
-  const { analysis, verification, provenance = {}, generatedAt, toolVersion, redaction } = safeReport;
+  const { analysis, verification, provenance = {}, generatedAt, toolVersion, redaction } = report;
   const { incident, suspects, warnings = [], candidateWindowMinutes, excludedCandidateCount } = analysis;
   const repository = provenance.repository;
   const lines = [];
@@ -229,12 +228,11 @@ export function renderMarkdown(report) {
 
 export function renderCsv(analysis) {
   if (!analysis?.suspects) throw new Error('analysis.suspects is required.');
-  const safeAnalysis = redactAndScrubDeep(analysis).value;
   const headers = [
     'rank', 'sha', 'message', 'score', 'confidence', 'coverage',
     'temporal', 'fileOverlap', 'testOverlap', 'diffRisk', 'dependencyImpact', 'missingSignals'
   ];
-  const rows = safeAnalysis.suspects.map((suspect, index) => [
+  const rows = analysis.suspects.map((suspect, index) => [
     index + 1,
     suspect.sha,
     suspect.message,

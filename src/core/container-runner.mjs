@@ -135,6 +135,22 @@ function imageUnavailable(runtime, image, details) {
   );
 }
 
+function daemonUnavailable(runtime, details) {
+  return new ContainerUnavailableError(
+    'container_daemon_unavailable',
+    `The ${runtime} runtime is installed but its daemon is unavailable. Start the ${runtime} daemon before running production verification; PatchTrace will not fall back to temp-copy mode.`,
+    { runtime, ...details }
+  );
+}
+
+function indicatesDaemonUnavailable(result) {
+  const output = [result?.stderr, result?.stdout, result?.error]
+    .filter((value) => typeof value === 'string')
+    .join('\n')
+    .toLowerCase();
+  return /cannot connect|failed to connect|connection refused|daemon (?:is )?not running|podman machine|npipe:|dockerdesktoplinuxengine/.test(output);
+}
+
 function commandStatus(result) {
   return result && typeof result.status === 'string' ? result.status : 'error';
 }
@@ -156,6 +172,7 @@ export async function prepareContainerRuntime({
   const settings = containerSettings({ runtime, image });
   const candidates = settings.runtime ? [settings.runtime] : ['docker', 'podman'];
   const availableRuntimes = [];
+  const daemonUnavailableRuntimes = [];
 
   for (const candidate of candidates) {
     if (signal?.aborted) throw new ContainerCancelledError();
@@ -191,10 +208,18 @@ export async function prepareContainerRuntime({
         version: typeof version.stdout === 'string' ? version.stdout.trim() : ''
       };
     }
+    if (indicatesDaemonUnavailable(imageCheck)) {
+      if (settings.runtime) throw daemonUnavailable(candidate, { phase: 'daemon' });
+      daemonUnavailableRuntimes.push(candidate);
+      continue;
+    }
     if (settings.runtime) throw imageUnavailable(candidate, settings.image, { phase: 'image-inspect' });
   }
 
   if (availableRuntimes.length) {
+    if (daemonUnavailableRuntimes.length === availableRuntimes.length) {
+      throw daemonUnavailable(availableRuntimes[0], { phase: 'daemon' });
+    }
     throw imageUnavailable(availableRuntimes[0], settings.image, { phase: 'image-inspect' });
   }
   throw runtimeUnavailable(

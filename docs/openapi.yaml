@@ -482,7 +482,7 @@ components:
       additionalProperties: true
     Suspect:
       type: object
-      required: [sha, message, timestamp, score, confidence, coverage, missingSignals, evidence]
+      required: [sha, message, timestamp, score, confidence, factors, contributions, coverage, signalAvailability, signalSources, signalDetails, missingSignals, evidence]
       properties:
         sha:
           $ref: '#/components/schemas/Sha'
@@ -497,10 +497,33 @@ components:
         confidence:
           type: string
           enum: [high, medium, low]
+        factors:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
+        contributions:
+          type: object
+          additionalProperties:
+            type: number
+            minimum: 0
+            maximum: 1
         coverage:
           type: number
           minimum: 0
           maximum: 1
+        signalAvailability:
+          type: object
+          additionalProperties:
+            type: boolean
+        signalSources:
+          type: object
+          additionalProperties:
+            type: string
+        signalDetails:
+          type: object
+          additionalProperties: true
         missingSignals:
           type: array
           items:

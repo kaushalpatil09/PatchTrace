@@ -4,7 +4,7 @@
 **Target:** PatchTrace 1.0 — local-first, single-user incident analysis  
 **Last updated:** 2026-10-21
 
-> **Current implementation:** M0 safety controls and a substantial M1 vertical slice are implemented and tested. The constrained container runner, hand-written API contracts and OpenAPI document, dependency-impact heuristic, release metadata, Docker CI job, and resource limits are in place; live Docker verification passes on Windows. Remaining blockers are dedicated-VM validation, full package-graph analysis, assistive-technology review, and executing the release gates. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the verified checklist.
+> **Current implementation:** M0 safety controls and a substantial M1 vertical slice are implemented and tested. The constrained container runner, hand-written API contracts and OpenAPI document, dependency-impact heuristic, release metadata, Docker CI job, and resource limits are in place. No live Docker or Podman verification is claimed from this checkout: the current doctor result reports that the Docker daemon is unavailable. Dedicated-VM validation, live container validation, full package-graph analysis, assistive-technology review, and executing the release gates remain open. See [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) for the verified checklist.
 
 ---
 
@@ -37,8 +37,8 @@ PatchTrace 1.0 is:
 | Node.js | Node 22 LTS or newer; tested on 22 and 24 |
 | Git | Git 2.31 or newer |
 | Browsers | Current Chrome, Edge, Firefox, Safari |
-| Containers | Docker or Podman for the isolated verification mode; if neither is available, real verification is disabled and temp-copy mode is demo-only |
-| Network | Not required after installation; verification sandbox must run with networking disabled |
+| Containers | Docker or Podman for the constrained verification mode; if neither is available, production/container verification is unavailable and trusted-local temp-copy mode remains best-effort only |
+| Network | Not required after installation; constrained container verification runs with networking disabled |
 | Filesystems | NTFS, APFS, ext4; Unicode paths; CRLF and LF inputs |
 
 ### 2.3 Trust model
@@ -287,9 +287,9 @@ Priority key:
 | ID | Priority | Requirement | Acceptance criteria |
 |---|---|---|---|
 | FR-1001 | P0 | Node and Git requirements | `engines` and documentation match tested versions. |
-| FR-1002 | P0 | Reproducible install | `npm ci` works from a clean checkout with no network after cache warm-up. |
+| FR-1002 | P0 | Reproducible install | `npm ci --ignore-scripts` works from a clean checkout with the checked-in lockfile; after the dependency cache is warm, no install network is required. |
 | FR-1003 | P0 | Docker image | Multi-stage build, non-root user, `.dockerignore`, healthcheck, `HOST=0.0.0.0`, and `--init` guidance. |
-| FR-1004 | P0 | CI matrix | Ubuntu and Windows run `npm ci`, `npm test`, `npm run smoke`, and the CLI doctor. |
+| FR-1004 | P0 | CI matrix | Ubuntu and Windows run `npm ci --ignore-scripts` and `npm run check`; Ubuntu/Node 22 also runs the lockfile-based `npm run security` audit. |
 | FR-1005 | P0 | Release artifacts | Versioned source archive, Docker tag, and checksums. |
 | FR-1006 | P0 | SemVer and changelog | Every release has a version, date, changes, and migration notes. |
 | FR-1007 | P0 | License | MIT or Apache-2.0 is present and referenced from the README and package metadata. |
@@ -534,18 +534,20 @@ Priority key:
 
 ### 9.2 CI gates
 
-Every pull request must pass:
+The checked-in `.github/workflows/ci.yml` currently runs this local gate on every Ubuntu/Windows and Node 22/24 matrix entry:
 
 ```bash
-npm ci
-npm test
-npm run smoke
-npm run test:coverage
-npm run lint
-npm run test:security
+npm ci --ignore-scripts
+npm run check
 ```
 
-The coverage, lint, and security scripts must be added as part of M3. Until then, the existing `npm test` and `npm run smoke` are the minimum gate.
+The Ubuntu/Node 22 matrix entry also runs the release security gate:
+
+```bash
+npm run security
+```
+
+That script is `npm audit --package-lock-only --omit=dev --audit-level=high`: the dependency graph comes from the checked-in lockfile, while advisory results come from the configured npm registry and can change over time. `npm run test:coverage` is available locally but is not currently a CI gate. `npm run lint` and `npm run test:security` are future gates, not scripts in the current package.
 
 Plus:
 
@@ -609,7 +611,7 @@ Performance requirements:
 
 ### 11.1 Release gates
 
-- [ ] `npm ci` from a clean checkout.
+- [ ] `npm ci --ignore-scripts` from a clean checkout.
 - [ ] `npm test` on Windows and Linux.
 - [ ] `npm run smoke` on Windows and Linux.
 - [ ] Docker image builds, runs as non-root, passes health check, and serves the UI.
@@ -816,7 +818,7 @@ Exit criteria: a new user can install, load a real bundle, analyze, verify, and 
 
 - [ ] CI matrix passes on Windows and Linux.
 - [ ] Docker image builds and runs.
-- [ ] `npm ci`, `npm test`, `npm run smoke` pass.
+- [ ] `npm ci --ignore-scripts`, `npm run check`, and the Ubuntu/Node 22 `npm run security` gate pass.
 - [ ] CLI doctor passes.
 - [ ] License, changelog, contributing, and security docs present.
 - [ ] Release artifacts and checksums published.

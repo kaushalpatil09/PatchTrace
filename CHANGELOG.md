@@ -17,6 +17,7 @@
 - Ubuntu CI image build/runtime checks, while the Node test matrix continues to run on Ubuntu and Windows with Node 22 and 24.
 - Local `doctor`, `check`, `security`, UI/CLI, and Node built-in coverage-compatible npm gates.
 - Operational guidance for request limits, repository-copy limits, container resources, readiness semantics, and release validation.
+- CLI verification output records the requested/effective mode, boundary type, and audit context; default temp-copy execution is labeled trusted-local best-effort, while production/container preflight remains fail-closed.
 
 ### Accessibility
 
@@ -35,7 +36,7 @@
 
 ### Known limitations
 
-- Default real verification uses temporary-copy isolation; production mode requires the constrained Docker/Podman runner, while a dedicated VM remains a stronger boundary.
+- Default real verification uses trusted-local best-effort temporary-copy execution, not a sandbox; production mode requires the constrained Docker/Podman runner, while a dedicated VM remains a stronger boundary.
 - API request/response contracts are validated for the current local routes and documented in `docs/openapi.yaml`; a generated schema toolchain is intentionally not added.
 - Dependency impact is derived from supported manifest/lockfile changes and bounded diff churn; full source-level package-graph analysis remains deferred.
 - Docker runtime validation requires a Docker daemon; the checked-in Ubuntu CI job is the source of truth when it runs on GitHub-hosted runners.

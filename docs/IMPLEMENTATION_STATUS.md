@@ -20,12 +20,12 @@ Last updated: 2026-10-21
 - Windows command resolution for `.cmd` launchers such as `npm`, with explicit `cmd.exe` invocation rather than caller-built shell strings; POSIX process-group kill and Windows `taskkill /T /F`.
 - Timeout with a forced-resolution grace period, output caps, environment allowlist, and cleanup that does not hide the verification result.
 - Best-effort output redaction for private keys, token formats, bearer tokens, JWTs, URL credentials, and password/token assignments; Markdown/CSV rendering and JSON report exports use the same key-aware deep-redaction rules.
-- Source fingerprint checks (HEAD, status including untracked files, `.git/config` hash), audit timing fields, and `sourceUnchanged` reporting.
+- Source fingerprint checks (HEAD, status including untracked files, `.git/config` hash), requested/effective isolation mode and boundary audit fields, audit timing fields, and `sourceUnchanged` reporting.
 - `/api/health` reports Git availability/version, temporary-directory writability, readiness, and verification activity.
 - Parsers: quoted/BOM/CRLF CSV; bounded JUnit self-closing cases, skipped tests, namespaces, entities, single-quoted attributes, CDATA, strict nesting, and malformed-XML errors.
 - Scoring: timezone-mandatory timestamps, post-incident deployment exclusion, environment matching, candidate windows, short/full SHA deployment matching with ambiguity refusal, deployment commit lists, file-overlap/test-overlap separation, coverage-aware confidence, contribution breakdown, missing evidence, deterministic tie-breaking, and bounded why-not explanations.
 - Docker image uses a dependency/runtime multi-stage build, binds `0.0.0.0` inside the container, installs Git and CA certificates, runs as the non-root `node` user, and has a readiness-aware healthcheck and `.dockerignore`.
-- CLI `doctor` reports local analysis readiness separately from container runtime/image readiness, exposes `productionReady`/`containerRequired`, and fails strictly when `--strict-container` or production isolation requires an unavailable image/runtime.
+- CLI `doctor` reports local analysis readiness separately from container runtime/daemon/image readiness, exposes `productionReady`/`containerRequired`, and fails strictly when `--strict-container` or production isolation requires an unavailable runtime, daemon, or image.
 - Public npm metadata points to the configured GitHub remote, removes the private publication block, declares MIT licensing, and curates the package contents.
 - Browser accessibility baseline: skip link, semantic landmarks, labels, live regions, focus handling, keyboard-safe native controls, responsive/zoom behavior, reduced motion, forced-colors/high-contrast fallbacks, and static regression checks.
 - Resource and operational guidance covers body/input limits, parser and collection bounds, Git enrichment limits, verification budgets, Docker resources, readiness semantics, and release gates.
@@ -48,7 +48,7 @@ Last updated: 2026-10-21
 
 ### Before calling this production-ready
 
-- **Live verification-mode container/VM validation.** The constrained runner passes an end-to-end Docker verification on Windows, including a CRLF worktree with a failing candidate that reverted and passed inside the container. A dedicated VM audit and Linux/Podman coverage remain deployment gates.
+- **Live verification-mode container/VM validation.** The constrained runner and its injected-runner tests are implemented, but this checkout does not claim a live Docker or Podman verification: `npm run doctor -- --json` reports that the Docker daemon is unavailable. A live Docker/Podman run, dedicated VM audit, and Linux/Podman coverage remain deployment gates.
 - **Generated API schema tooling** beyond the dependency-free hand-written route contracts. OpenAPI 3.1 is checked in at `docs/openapi.yaml` and route-level docs exist in `docs/API.md`.
 - **Full source-level package-graph analysis** remains deferred. Current Git enrichment derives a transparent dependency-impact heuristic from supported manifests/lockfiles and bounded diff churn; explicit values remain labeled as provided.
 - **Large-repository and slow-command performance tests.** A synthetic bundle at the documented collection limits is covered; repository copying/enrichment at scale is not.
@@ -63,11 +63,13 @@ Last updated: 2026-10-21
 ## Verification commands
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm test
 npm run smoke
 npm run doctor -- --json
 npm run security
 ```
 
-The test suite covers analysis, bounded parsers, scoring regressions, short/full SHA matching, derived dependency impact, why-not explanations, API security/contracts, report request validation, bundle validation, Git enrichment limits, ingestion, report rendering, path scrubbing and JSON redaction, injection escaping, CLI behavior, UI accessibility/static wiring, API report generation, temporary-copy verification, container preflight behavior, absolute-link source-integrity rejection, dirty-worktree rejection, worktree rejection, path-escape detection, verification concurrency and cancellation, flaky-baseline detection, stale-workspace sweeping, output redaction, bundle collection limits including a synthetic maximum-size analysis/report run, and the Windows `npm` launcher path. `npm run test:coverage` is available as an on-demand Node built-in coverage path; no percentage is claimed without running and reviewing it.
+`npm run check` is the local test/smoke/doctor gate. `npm run check:release` additionally recreates `node_modules` with `npm ci --ignore-scripts` and runs the lockfile-based `npm audit --package-lock-only --omit=dev --audit-level=high`. The install graph is pinned by `package-lock.json`, while audit findings depend on the configured npm registry's current advisory database.
+
+The test suite covers analysis, bounded parsers, scoring regressions, short/full SHA matching, derived dependency impact, why-not explanations, API security/contracts, report request validation, bundle validation, Git enrichment limits, ingestion, report rendering, path scrubbing and JSON redaction, injection escaping, CLI behavior, UI accessibility/static wiring, temporary-copy verification, container preflight behavior, absolute-link source-integrity rejection, dirty-worktree rejection, worktree rejection, path-escape detection, verification concurrency and cancellation, flaky-baseline detection, stale-workspace sweeping, output redaction, bundle collection limits including a synthetic maximum-size analysis/report run, and the Windows `npm` launcher path. Verification results record the requested/effective mode and boundary type; the default temp-copy mode is trusted-local best-effort execution, not a sandbox. `npm run test:coverage` is available as an on-demand Node built-in coverage path; no percentage is claimed without running and reviewing it.

@@ -101,7 +101,7 @@ curl -X POST http://127.0.0.1:4173/api/analyze \
   --data-binary @fixtures/sample-incident/manifest.json
 ```
 
-Success: `200` with the analysis object, including `schemaVersion`, `incident`, `timeline`, `suspects`, `warnings`, `candidateWindowMinutes`, `excludedCandidateCount`, `weights`, and fixture `verification`. See [`INCIDENT_BUNDLE.md`](INCIDENT_BUNDLE.md) for input fields.
+Success: `200` with the analysis object, including `schemaVersion`, `incident`, `timeline`, `suspects`, `warnings`, `candidateWindowMinutes`, `excludedCandidateCount`, `weights`, and fixture `verification`. Each suspect includes factors, contributions, per-candidate `signalAvailability`, `signalSources`, `signalDetails`, coverage, missing signals, and evidence. See [`INCIDENT_BUNDLE.md`](INCIDENT_BUNDLE.md) for input fields.
 
 Invalid bundle: `400` with `error.code = "invalid_bundle"` and field paths.
 
@@ -152,7 +152,9 @@ Only available when the server starts with `PATCHTRACE_ENABLE_VERIFY=1`.
 
 `repoPath` must be a normal Git worktree root with no uncommitted or untracked changes. Linked worktrees, submodule checkouts, bare/shallow repositories, filesystem roots, dirty worktrees, and symlinks escaping the root are rejected. `sha` must be 4–64 hex characters. `testCommand` is an argv array; it is never passed through a shell. Empty arguments and null bytes are rejected. `timeoutMs` is a per-command limit from 1–600000, default `30000`. The overall test budget is `timeoutMs × (baseline runs + 1) + 10 seconds` (100 seconds with defaults), so a sequence of commands cannot hang indefinitely. `mainline` is a positive integer, default `1`.
 
-Verification uses `PATCHTRACE_VERIFY_ISOLATION=temp-copy` by default. Set it to `production` to require the constrained Docker/Podman runner and a pre-built local image; unavailable runtime, image, or resource budgets return `unsupported` rather than falling back silently.
+Verification uses a trusted-local `PATCHTRACE_VERIFY_ISOLATION=temp-copy` mode by default. Temp-copy execution is best-effort and **not a security sandbox**: a trusted test command may still access the host filesystem or network. Set it to `production` to require the constrained Docker/Podman runner and a pre-built local image; unavailable runtime, image, or resource budgets return `unsupported` rather than falling back silently.
+
+When container preflight returns `unsupported`, no verification workspace or test phase is started. The result keeps the requested boundary type for audit context and reports that the constrained boundary was not established. A missing daemon is reported separately from an unavailable local image.
 
 Only one real verification can run at a time. A concurrent request receives `409` with `error.code = "verification_in_progress"`.
 
@@ -169,10 +171,10 @@ Result fields:
 - `revert`: Git revert status and output, or `null` if it was not attempted.
 - `sourceUnchanged`: whether the source HEAD/status/config fingerprint still matches.
 - `cleanup`: whether the temporary workspace was removed. `{ removed: false, skipped: true }` means no workspace was created.
-- `isolation`, `isolationRequested`, `platform`, `testCommand`, `timeoutMs`, `overallBudgetMs`, `baselineRunsRequested`, `startedAt`, `finishedAt`, and `durationMs`: audit fields. Container mode also reports `containerRuntime`, `containerImage`, `repositoryBytes`, and `freeSpaceBytes`.
+- `isolation`, `isolationRequested`, `isolationBoundary`, `platform`, `testCommand`, `timeoutMs`, `overallBudgetMs`, `baselineRunsRequested`, `startedAt`, `finishedAt`, and `durationMs`: audit fields. `isolationBoundary` is `trusted-local-temp-copy` for the default mode or `constrained-container` for production/container mode. Container mode also reports `containerRuntime`, `containerImage`, `repositoryBytes`, and `freeSpaceBytes`.
 - Command `stdout`/`stderr` are capped at 256 KB per stream, marked when truncated, and best-effort redacted for private keys, common token formats, bearer tokens, JWTs, URL credentials, and `password`/`token`/`secret` assignments. `redactions` records how many matches were removed. Redaction is not a guarantee; do not print secrets deliberately.
 
-A confirmed result means the candidate revert changed the test outcome in the temporary copy or constrained container workspace. It is evidence, not proof of root cause. `temp-copy` is best-effort isolation, not a sandbox; production container mode is a stronger boundary but still depends on a trusted runtime, image, and host.
+A confirmed result means the candidate revert changed the test outcome in the trusted-local temporary copy or constrained container workspace selected for the run. It is evidence, not proof of root cause. Production container mode is a stronger boundary but still depends on a trusted runtime, image, and host.
 
 #### `POST /api/verify/cancel`
 

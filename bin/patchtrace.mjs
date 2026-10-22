@@ -40,9 +40,10 @@ Bundle input:
   - schema: docs/INCIDENT_BUNDLE.md
 
 Verification:
-  - default verification is a local, best-effort temporary-copy check
-  - set PATCHTRACE_VERIFY_ISOLATION=production to require the constrained container runner
-  - neither mode proves root cause; container readiness is reported by doctor
+  - default mode is a trusted-local temp-copy: best-effort only, not a security sandbox
+  - set PATCHTRACE_VERIFY_ISOLATION=production to require the constrained Docker/Podman runner
+  - production mode fails closed when its runtime or image is unavailable; it never falls back to temp-copy
+  - human and JSON results report the requested/effective mode, boundary, and audit fields
 
 Exit codes:
   0 success/confirmed   1 not confirmed   2 invalid input   3 timeout   4 command error
@@ -146,9 +147,25 @@ function humanAnalysis(report) {
   return lines.join('\n');
 }
 
+function verificationIsolationNotice(result) {
+  if (result.isolation === 'container') {
+    if (['container_runtime_unavailable', 'container_daemon_unavailable', 'container_image_unavailable'].includes(result.reason)) {
+      return 'constrained Docker/Podman mode was requested but not established; production/container mode fails closed when its runtime or image is unavailable and never falls back to temp-copy.';
+    }
+    return 'constrained Docker/Podman container; production/container mode fails closed when its runtime or image is unavailable and never falls back to temp-copy.';
+  }
+  if (result.isolation === 'temp-copy') {
+    return 'trusted-local temporary copy; best-effort boundary only, not a security sandbox, and the command may access the host filesystem or network.';
+  }
+  return 'isolation mode was not established.';
+}
+
 function humanVerification(result) {
   const lines = [];
   lines.push(`Verification: ${result.status} (${result.outcome})`);
+  lines.push(`Isolation: ${result.isolation || 'unknown'} (requested ${result.isolationRequested || result.isolation || 'unknown'})`);
+  if (result.isolationBoundary) lines.push(`Boundary type: ${result.isolationBoundary}`);
+  lines.push(`Isolation boundary: ${result.isolationNotice || verificationIsolationNotice(result)}`);
   lines.push(`Reason: ${result.reason}`);
   if (result.message) lines.push(`Message: ${result.message}`);
   lines.push(`Source unchanged: ${result.sourceUnchanged ? 'yes' : 'no'}`);
@@ -238,7 +255,7 @@ async function commandDoctor(args) {
     container = {
       ready: false,
       status: 'unavailable',
-      runtimeReady: error.code !== 'container_runtime_unavailable',
+      runtimeReady: !['container_runtime_unavailable', 'container_daemon_unavailable'].includes(error.code),
       imageReady: false,
       runtime: error.details?.runtime ?? process.env.PATCHTRACE_CONTAINER_RUNTIME ?? null,
       image: error.details?.image ?? process.env.PATCHTRACE_VERIFY_IMAGE ?? 'patchtrace:local',
@@ -506,7 +523,11 @@ async function commandVerify(args) {
     process.off('SIGINT', cancel);
     process.off('SIGTERM', cancel);
   }
-  await output(parsed.values.json ? JSON.stringify(result, null, 2) : humanVerification(result), parsed.values.out);
+  const presented = {
+    ...result,
+    isolationNotice: verificationIsolationNotice(result)
+  };
+  await output(parsed.values.json ? JSON.stringify(presented, null, 2) : humanVerification(presented), parsed.values.out);
   return verificationExitCode(result);
 }
 

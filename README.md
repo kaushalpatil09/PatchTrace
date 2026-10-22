@@ -96,7 +96,7 @@ The following capabilities are implemented in the repository:
 - CLI commands for readiness checks, validation, ingestion, analysis, rollback verification, and report export.
 - JSON, Markdown, and CSV report rendering with provenance and best-effort secret/path redaction.
 - Fixture verification that reads stored demo results without executing a repository.
-- Real verification that is disabled by default, bounded by time and output limits, and runs only in a temporary copy or explicitly requested constrained Docker/Podman mode.
+- Real verification that is disabled by default, bounded by time and output limits, and runs either in a trusted-local temporary copy (best-effort, not a sandbox) or in an explicitly requested constrained Docker/Podman mode.
 - Local HTTP API with session tokens, `Host`/`Origin` checks, JSON-only POST bodies, structured errors, request limits, and a readiness endpoint.
 - Accessibility-oriented browser behavior: skip link, semantic landmarks, live status regions, keyboard-safe native controls, visible focus, reduced-motion support, high-contrast/forced-colors fallbacks, and responsive layout.
 
@@ -233,10 +233,10 @@ Node must be `22.x` or newer and Git must be `2.31` or newer.
 ### 3. Install from the lockfile
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 ```
 
-PatchTrace currently has no runtime dependencies. `npm ci` still validates the package metadata and lockfile from a clean checkout.
+PatchTrace currently has no runtime dependencies. `npm ci --ignore-scripts` still validates the package metadata and lockfile from a clean checkout without running lifecycle scripts.
 
 ### 4. Run the readiness check
 
@@ -329,7 +329,7 @@ An additional schema-valid demo bundle with a clearly faulty pricing change is a
 | Mode | What it does | Safety/meaning |
 | --- | --- | --- |
 | **Fixture verification** | Reads the server-owned verification entry in `fixtures/sample-incident/manifest.json`. | Deterministic demo evidence; no repository or test command is executed. |
-| **Temp-copy verification** | Copies a trusted Git worktree, runs the baseline command twice, reverts the candidate only in the copy, and runs the command again. | Opt-in and bounded, but **best-effort isolation, not a sandbox**. The test command may still access the host. |
+| **Temp-copy verification** | Copies a trusted Git worktree, runs the baseline command twice, reverts the candidate only in the copy, and runs the command again. | Opt-in and bounded, but **trusted-local best-effort execution, not a security sandbox**. The test command may still access the host filesystem or network. |
 | **Production isolation** | Runs verification phases in fresh Docker/Podman containers with no network, non-root identity, read-only source mount, writable workspace, and resource limits. | Requires a ready local runtime and pre-built image; fails closed instead of silently falling back. |
 
 To enable live verification for a local trusted preview:
@@ -417,7 +417,7 @@ For each candidate, PatchTrace computes or records:
 | Diff risk | 15% | The supplied `diffRisk`, or a bounded Git-churn derivation during repository enrichment. |
 | Dependency impact | 10% | The supplied `dependencyImpact`, or a transparent heuristic from supported dependency manifests/lockfiles and diff churn. |
 
-Each output contains raw factor values, weighted contributions, `signalSources` (`derived`, `provided`, or `missing`), `coverage`, `missingSignals`, and human-readable evidence items. High confidence requires both a high score and at least 80% signal coverage.
+Each output contains raw factor values, weighted contributions, per-candidate `signalAvailability`, `signalSources` (`derived`, `provided`, or `missing`), `signalDetails`, `coverage`, `missingSignals`, and human-readable evidence items. High confidence requires both a high score and at least 80% signal coverage. An observed no-overlap result is distinct from unavailable evidence.
 
 ### 4. Enrich from a local repository
 
@@ -427,7 +427,7 @@ The supported enrichment path rejects linked worktrees, submodule checkouts, bar
 
 ### 5. Optionally test a rollback hypothesis
 
-Real verification:
+Real verification defaults to the trusted-local temp-copy mode. That mode is **not a security sandbox**; use only a trusted repository and test command. Each result records the requested mode, effective mode, boundary type, timing, and cleanup audit fields:
 
 1. Validates the repository and source fingerprint.
 2. Checks repository-copy size and available temporary space.
@@ -439,7 +439,7 @@ Real verification:
 8. Runs the candidate test command again and compares the result.
 9. Caps command output, applies best-effort redaction, removes the temporary workspace, and re-checks the source fingerprint.
 
-A `confirmed` result supports the rollback hypothesis in the temporary copy or constrained container. It does not prove root cause, production safety, or that the candidate was the only contributing change.
+A `confirmed` result supports the rollback hypothesis in the trusted-local temporary copy or constrained container selected for the run. It does not prove root cause, production safety, or that the candidate was the only contributing change.
 
 ## CLI reference
 
@@ -502,7 +502,7 @@ node bin/patchtrace.mjs report bundle.json --format csv --out ranking.csv
 
 Use `--generated-at <ISO-8601-with-timezone>` when a reproducible report timestamp is required.
 
-### Verify a candidate in a temporary copy
+### Verify a candidate in the trusted-local temporary copy
 
 ```bash
 node bin/patchtrace.mjs verify \
@@ -513,7 +513,7 @@ node bin/patchtrace.mjs verify \
   --json
 ```
 
-For unusual quoting, pass an explicit argv array:
+The default mode is trusted-local best-effort and **not a security sandbox**. For unusual quoting, pass an explicit argv array:
 
 ```bash
 node bin/patchtrace.mjs verify \
@@ -522,12 +522,14 @@ node bin/patchtrace.mjs verify \
   --test-command '["npm","test","--","--runInBand"]'
 ```
 
-The `--timeout` value is per command and accepts `1`–`600000` milliseconds. The default baseline runs twice. CLI exit codes are:
+To require the constrained production/container boundary instead, set `PATCHTRACE_VERIFY_ISOLATION=production` and make a local Docker/Podman runtime plus the configured image available. Production mode fails closed when either is unavailable; it never falls back to temp-copy mode.
+
+The `--timeout` value is per command and accepts `1`–`600000` milliseconds. The default baseline runs twice. Human output and `--json` output identify the requested/effective mode, boundary type, and audit timing/cleanup fields. CLI exit codes are:
 
 | Code | Meaning |
 | ---: | --- |
 | `0` | Success or confirmed rollback hypothesis. |
-| `1` | Not confirmed, inconclusive, or doctor found a local problem. |
+| `1` | Not confirmed, inconclusive, doctor found a local problem, or a requested production/container capability is unavailable. |
 | `2` | Invalid input, unsupported repository layout, or usage error. |
 | `3` | Timeout. |
 | `4` | Command, runner, or revert error. |
@@ -662,7 +664,7 @@ The repository uses Node.js's built-in test runner and an offline smoke script. 
 ### Standard checks
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm test
 npm run smoke
 npm run doctor -- --json
@@ -676,30 +678,18 @@ npm run test:ui
 npm run test:cli
 npm run test:coverage
 npm run check
+npm run check:release
 ```
 
-`npm run test:coverage` enables Node's built-in coverage instrumentation; the repository does not claim a coverage percentage until the output is reviewed. `npm run security` runs the npm audit for the installed dependency graph.
+`npm run test:coverage` enables Node's built-in coverage instrumentation; the repository does not claim a coverage percentage until the output is reviewed. `npm run security` runs `npm audit --package-lock-only --omit=dev --audit-level=high` against the lockfile dependency graph. The package graph is reproducible from `package-lock.json`, but npm audit's advisory database is served by the configured npm registry and can change over time; it is not an offline or permanently reproducible vulnerability snapshot.
 
 ### What the tests cover
 
 The suite covers validation, timeline ordering, scoring and confidence, short/full SHA matching, dependency-impact derivation, CSV/JUnit parsing and limits, Git enrichment, ingestion provenance, report rendering/redaction, API authentication and contracts, UI static/accessibility wiring, temporary-copy verification, container preflight, timeouts, cancellation, stale-workspace cleanup, source-integrity checks, and synthetic maximum-size inputs.
 
-### Verification performed while preparing this README
+### Release result reporting
 
-The following commands were run successfully in this checkout on **October 21, 2026**:
-
-| Command | Observed result |
-| --- | --- |
-| `npm test` | 102 tests, 0 failed; 1 Windows-only symlink test skipped. |
-| `npm run smoke` | Auth, sample API, analysis, fixture verification, and redacted report export reported available. |
-| `npm run doctor -- --strict-container` | Node, Git, temporary workspace, Docker `29.8.2`, and `patchtrace:local` all reported ready. |
-| `npm run security` | `npm audit --omit=dev --audit-level=high` reported 0 vulnerabilities. |
-| `npm run test:ui` | 6 UI static/accessibility checks passed. |
-| `npm run test:cli` | 7 CLI checks passed. |
-| `npm run check` | Test, smoke, and doctor gates completed successfully. |
-| Production-isolation verification | Docker `29.8.2` + `patchtrace:local`; baseline failed, the candidate reverted in the isolated workspace, and the candidate phase passed. |
-
-After Docker was enabled, the strict doctor gate reported all checks ready. A synthetic repository with a failing candidate was also verified through the production container runner on Windows.
+Run the exact commands above from the checkout being released and record their actual output. Test results, Docker/image readiness, operating-system behavior, and npm audit findings are environment-dependent; the README does not treat an earlier run as a permanent pass claim. In particular, `npm run security` reports against the current advisory database from the configured npm registry, while `npm ci --ignore-scripts` supplies the reproducible dependency graph from `package-lock.json`.
 
 ## Troubleshooting
 
@@ -742,8 +732,8 @@ These bounds are implemented to keep local processing predictable. They are not 
 
 The following are verified limitations or deliberate scope boundaries, not hidden features:
 
-- The default temp-copy verifier is best-effort isolation, not a sandbox. A trusted command may access the host filesystem, network, CPU, or memory.
-- Production isolation requires a Docker/Podman daemon, a pre-built local image, and a trusted host. A dedicated VM is the stronger operational boundary.
+- The default temp-copy verifier is trusted-local best-effort execution, not a sandbox. A trusted command may access the host filesystem, network, CPU, or memory.
+- Production isolation requires a reachable Docker/Podman daemon, a pre-built local image, and a trusted host. PatchTrace distinguishes a missing daemon from a missing image and fails closed; a dedicated VM is the stronger operational boundary.
 - Dependency impact is a transparent heuristic based on supported manifest/lockfile paths and bounded diff churn; it is not a full source-level package graph.
 - Diff risk is derived from bounded line churn when Git enrichment is used; it is not a semantic code-risk model.
 - There is no persistence, investigation history, account system, multi-user mode, upload service, or rate limiter.
@@ -770,12 +760,14 @@ Contributions are welcome when they preserve PatchTrace's local-first, determini
 Before opening a change, read [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md). The repository's documented local workflow is:
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm test
 npm run smoke
 npm run doctor -- --json
 npm run security
 ```
+
+For a clean release-style gate, `npm run check:release` performs `npm ci --ignore-scripts`, the local `check` gate, and the lockfile-based npm audit. The audit still consults the configured registry's current advisory data, so record the registry and date when reporting its result.
 
 When changing analysis, API, parser, reporting, or verification behavior:
 

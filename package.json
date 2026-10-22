@@ -52,9 +52,9 @@
     "coverage": "npm run test:coverage",
     "smoke": "node scripts/smoke.mjs",
     "doctor": "node bin/patchtrace.mjs doctor",
-    "security": "npm audit --omit=dev --audit-level=high",
+    "security": "npm audit --package-lock-only --omit=dev --audit-level=high",
     "check": "npm run test && npm run smoke && npm run doctor -- --json",
-    "check:release": "npm ci --ignore-scripts && npm run check",
+    "check:release": "npm ci --ignore-scripts && npm run check && npm run security",
     "ingest": "node bin/patchtrace.mjs ingest",
     "patchtrace": "node bin/patchtrace.mjs"
   }

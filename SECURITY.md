@@ -13,7 +13,7 @@ Report suspected vulnerabilities privately to the maintainers rather than in a p
 
 ## Important limitations
 
-Real verification is **best-effort temporary-copy isolation, not a sandbox**. A hostile test command can still read or modify files outside the repository, and it can reach the network. Only run trusted test commands against trusted repositories. Use a dedicated container or VM when a security boundary is required.
+Real verification defaults to trusted-local **best-effort temporary-copy execution, not a security sandbox**. A hostile test command can still read or modify files outside the repository, and it can reach the network. Only run trusted test commands against trusted repositories. Use constrained container mode or a dedicated VM when a stronger security boundary is required.
 
 When `PATCHTRACE_VERIFY_ISOLATION=production` is used, PatchTrace requires a pre-existing Docker or Podman runtime and local verification image. It fails closed when either is unavailable; it does not silently fall back to temporary-copy execution. The constrained runner uses a non-root identity, no network, read-only source input, bounded CPU/memory/PIDs/tmpfs, dropped capabilities, and a separate writable workspace. The image and runtime remain operator-controlled infrastructure, so keep the daemon and host trusted.
 

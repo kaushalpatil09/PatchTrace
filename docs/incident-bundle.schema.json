@@ -14,6 +14,7 @@
     "incidentEnd": { "$ref": "#/$defs/timestamp" },
     "candidateWindowMinutes": { "type": "number", "exclusiveMinimum": 0 },
     "incidentFiles": {
+      "description": "Non-empty incident file evidence enables per-candidate file-overlap evaluation when that candidate also supplies changedFiles. An absent or empty array leaves the signal unavailable.",
       "type": "array",
       "maxItems": 5000,
       "items": { "type": "string", "minLength": 1 }
@@ -29,6 +30,7 @@
           "timestamp": { "$ref": "#/$defs/timestamp" },
           "message": { "type": "string", "minLength": 1 },
           "changedFiles": {
+            "description": "Repository-relative paths. Omission means this candidate lacks file/test overlap evidence; an explicit empty array is observed no-changed-file evidence.",
             "type": "array",
             "maxItems": 5000,
             "items": { "type": "string", "minLength": 1 }
@@ -71,9 +73,13 @@
         "required": ["name", "status"],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
-          "timestamp": { "$ref": "#/$defs/timestamp" },
+          "timestamp": {
+            "description": "Optional source-provided test timestamp. Ingestion does not substitute incidentStart when this field is absent.",
+            "$ref": "#/$defs/timestamp"
+          },
           "status": { "enum": ["passed", "failed", "skipped"] },
           "relatedFiles": {
+            "description": "Files connected to the test. For failing tests, omission leaves candidate test-overlap unavailable; an explicit empty array is observed no-related-file evidence.",
             "type": "array",
             "maxItems": 5000,
             "items": { "type": "string", "minLength": 1 }

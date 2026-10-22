@@ -544,6 +544,7 @@ function baseResult(candidateSha, {
     cleanup: { removed: false },
     isolation,
     isolationRequested,
+    isolationBoundary: isolation === 'container' ? 'constrained-container' : 'trusted-local-temp-copy',
     containerRuntime,
     containerImage,
     repositoryBytes: null,

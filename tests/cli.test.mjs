@@ -12,13 +12,38 @@ const cli = fileURLToPath(new URL('../bin/patchtrace.mjs', import.meta.url));
 const fixture = fileURLToPath(new URL('../fixtures/sample-incident/manifest.json', import.meta.url));
 const cwd = fileURLToPath(new URL('..', import.meta.url));
 
-async function runCli(args) {
+async function runCli(args, { env, commandCwd = cwd, timeout = 30_000 } = {}) {
   try {
-    const { stdout, stderr } = await execFileAsync(process.execPath, [cli, ...args], { cwd, timeout: 30_000 });
+    const { stdout, stderr } = await execFileAsync(process.execPath, [cli, ...args], {
+      cwd: commandCwd,
+      timeout,
+      env: env ? { ...process.env, ...env } : process.env
+    });
     return { code: 0, stdout, stderr };
   } catch (error) {
     return { code: error.code, stdout: error.stdout || '', stderr: error.stderr || '' };
   }
+}
+
+async function runGit(repoPath, args) {
+  return execFileAsync('git', [
+    '-c', 'user.name=PatchTrace CLI Test',
+    '-c', 'user.email=patchtrace-cli@example.test',
+    ...args
+  ], { cwd: repoPath });
+}
+
+async function createVerificationRepository() {
+  const root = await mkdtemp(join(tmpdir(), 'patchtrace-cli-verify-'));
+  await runGit(root, ['init', '-q']);
+  await writeFile(join(root, 'state.txt'), 'good\n', 'utf8');
+  await runGit(root, ['add', 'state.txt']);
+  await runGit(root, ['commit', '-q', '-m', 'initial passing state']);
+  await writeFile(join(root, 'state.txt'), 'bad\n', 'utf8');
+  await runGit(root, ['add', 'state.txt']);
+  await runGit(root, ['commit', '-q', '-m', 'candidate regression']);
+  const sha = (await runGit(root, ['rev-parse', 'HEAD'])).stdout.trim();
+  return { root, sha };
 }
 
 test('validates the sample bundle and reports invalid bundles with exit code 2', async (t) => {
@@ -72,10 +97,10 @@ test('ingests local deployment and JUnit evidence into a versioned bundle', asyn
   assert.deepEqual(bundle.tests, [{
     name: 'VAT-07',
     status: 'failed',
-    timestamp: '2026-10-20T14:09:00Z',
     relatedFiles: ['src/tax.ts'],
     errorSignature: 'bad tax'
   }]);
+  assert.equal(Object.hasOwn(bundle.tests[0], 'timestamp'), false);
 });
 
 test('analyzes a bundle into a deterministic JSON report', async () => {
@@ -88,6 +113,63 @@ test('analyzes a bundle into a deterministic JSON report', async () => {
   assert.equal(report.provenance.bundleSha256.length, 64);
   assert.equal(report.provenance.platform, process.platform);
   assert.match(report.provenance.nodeVersion, /^v\d+/);
+});
+
+test('labels the default trusted-local verification boundary in JSON and human output', async (t) => {
+  const { root, sha } = await createVerificationRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const testCommand = JSON.stringify([
+    process.execPath,
+    '-e',
+    "const fs=require('node:fs'); const value=fs.readFileSync('state.txt','utf8').trim(); process.exit(value === 'good' ? 0 : 1);"
+  ]);
+
+  const jsonResult = await runCli([
+    'verify', '--repo', root, '--sha', sha,
+    '--test-command', testCommand, '--timeout', '5000', '--json'
+  ]);
+  assert.equal(jsonResult.code, 0, jsonResult.stderr);
+  const json = JSON.parse(jsonResult.stdout);
+  assert.equal(json.status, 'passed');
+  assert.equal(json.isolation, 'temp-copy');
+  assert.equal(json.isolationRequested, 'temp-copy');
+  assert.equal(json.isolationBoundary, 'trusted-local-temp-copy');
+  assert.match(json.isolationNotice, /trusted-local.*not a security sandbox/i);
+  assert.equal(json.sourceUnchanged, true);
+
+  const humanResult = await runCli([
+    'verify', '--repo', root, '--sha', sha,
+    '--test-command', testCommand, '--timeout', '5000'
+  ]);
+  assert.equal(humanResult.code, 0, humanResult.stderr);
+  assert.match(humanResult.stdout, /Isolation: temp-copy \(requested temp-copy\)/);
+  assert.match(humanResult.stdout, /Boundary type: trusted-local-temp-copy/);
+  assert.match(humanResult.stdout, /Isolation boundary: trusted-local temporary copy; best-effort boundary only, not a security sandbox/i);
+  assert.doesNotMatch(humanResult.stdout, /sandboxed|isolated workspace/i);
+});
+
+test('reports production isolation as constrained and fails closed in CLI JSON', async (t) => {
+  const { root, sha } = await createVerificationRepository();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const result = await runCli([
+    'verify', '--repo', root, '--sha', sha,
+    '--test-command', JSON.stringify(['node', '--version']), '--json'
+  ], {
+    env: {
+      PATCHTRACE_VERIFY_ISOLATION: 'production',
+      PATCHTRACE_CONTAINER_RUNTIME: 'patchtrace-runtime-that-is-not-installed'
+    }
+  });
+
+  assert.equal(result.code, 1, result.stderr);
+  const json = JSON.parse(result.stdout);
+  assert.equal(json.status, 'unsupported');
+  assert.equal(json.reason, 'container_runtime_unavailable');
+  assert.equal(json.isolation, 'container');
+  assert.equal(json.isolationRequested, 'production');
+  assert.equal(json.isolationBoundary, 'constrained-container');
+  assert.match(json.isolationNotice, /requested but not established/i);
+  assert.match(json.isolationNotice, /fails closed.*never falls back to temp-copy/i);
 });
 
 test('uses exit code 2 for unreadable inputs and invalid report timestamps', async (t) => {

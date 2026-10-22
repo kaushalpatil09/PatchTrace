@@ -285,6 +285,33 @@ function failingTestsFor(commit, failingTests) {
   return failingTests.filter((test) => intersection(changedFiles, test.relatedFiles ?? []).length > 0);
 }
 
+function overlapState(available, hasOverlap) {
+  if (!available) return 'unknown';
+  return hasOverlap ? 'observed_overlap' : 'observed_no_overlap';
+}
+
+function missingFileOverlapText({ hasIncidentFiles, hasChangedFiles }) {
+  if (!hasIncidentFiles && !hasChangedFiles) {
+    return 'Incident files and changedFiles were not provided, so file overlap could not be evaluated.';
+  }
+  if (!hasIncidentFiles) return 'No incident files were provided, so file overlap could not be evaluated.';
+  return 'No changedFiles were provided for this candidate, so file overlap could not be evaluated.';
+}
+
+function missingTestOverlapText({ hasChangedFiles, failingTests, missingRelatedTests }) {
+  if (!failingTests.length) return 'No failing test data was provided.';
+  if (!hasChangedFiles && missingRelatedTests.length) {
+    return 'No changedFiles were provided for this candidate, and some failing tests lack relatedFiles, so test overlap could not be evaluated.';
+  }
+  if (!hasChangedFiles) {
+    return 'No changedFiles were provided for this candidate, so test overlap could not be evaluated.';
+  }
+  if (missingRelatedTests.length) {
+    return 'Some failing tests do not provide relatedFiles, so test overlap could not be fully evaluated.';
+  }
+  return 'Test overlap could not be evaluated.';
+}
+
 function providedFactor(value, label) {
   if (value === undefined || value === null) {
     return { value: 0, provided: false };
@@ -548,6 +575,7 @@ function testcaseResult(attributes, body) {
     status,
     relatedFiles,
     errorSignature,
+    ...(attributes.timestamp !== undefined ? { timestamp: attributes.timestamp } : {}),
     ...(Number.isFinite(duration) ? { durationMs: Math.round(duration * 1000) } : {})
   };
 }
@@ -679,14 +707,16 @@ export function buildTimeline(input) {
       commitSha: deployment.commitSha ?? deploymentShas(deployment)[0] ?? null,
       source: 'deployment'
     })),
-    ...(input.tests ?? []).filter((test) => test.status === 'failed').map((test) => ({
-      kind: 'test_failure',
-      timestamp: test.timestamp ?? input.incidentStart,
-      title: `${test.name} failed`,
-      detail: test.errorSignature || 'failure recorded',
-      commitSha: null,
-      source: 'test'
-    })),
+    ...(input.tests ?? [])
+      .filter((test) => test.status === 'failed' && test.timestamp !== undefined && test.timestamp !== null)
+      .map((test) => ({
+        kind: 'test_failure',
+        timestamp: test.timestamp,
+        title: `${test.name} failed`,
+        detail: test.errorSignature || 'failure recorded',
+        commitSha: null,
+        source: 'test'
+      })),
     ...(input.incidentEvents ?? []).map((event) => ({
       kind: event.kind,
       timestamp: event.timestamp,
@@ -698,10 +728,19 @@ export function buildTimeline(input) {
   ];
 
   return events
-    .map((event) => ({ ...event, timestampMs: timestamp(event.timestamp), phase: phaseFor(event.timestamp, event.source) }))
-    .sort((a, b) => a.timestampMs - b.timestampMs
-      || compareText(a.kind, b.kind)
-      || compareText(a.title, b.title))
+    .map((event) => event.timestamp === null || event.timestamp === undefined
+      ? { ...event, phase: 'unknown', timestampMs: null }
+      : { ...event, timestampMs: timestamp(event.timestamp), phase: phaseFor(event.timestamp, event.source) })
+    .sort((a, b) => {
+      const aUnknown = a.timestampMs === null;
+      const bUnknown = b.timestampMs === null;
+      if (aUnknown !== bUnknown) return aUnknown ? 1 : -1;
+      return (aUnknown ? 0 : a.timestampMs - b.timestampMs)
+        || compareText(a.kind, b.kind)
+        || compareText(a.title, b.title)
+        || compareText(a.detail, b.detail)
+        || compareText(a.source, b.source);
+    })
     .map(({ timestampMs, ...event }) => event);
 }
 
@@ -715,10 +754,17 @@ export function scoreCommit(commit, input, deploymentMatches) {
     ?? createDeploymentMatches(input.deployments ?? [], [...knownCommitShas, commit.sha], input.environment);
   const deployment = deploymentFor(commit, input.environment, incidentMs, resolvedDeployments);
   const failingTests = (input.tests ?? []).filter((test) => test.status === 'failed');
-  const relatedTests = failingTestsFor(commit, failingTests);
+  const hasIncidentFiles = Array.isArray(input.incidentFiles) && input.incidentFiles.length > 0;
+  const hasChangedFiles = Array.isArray(commit.changedFiles);
+  const missingRelatedTests = failingTests.filter((test) => !Array.isArray(test.relatedFiles));
+  const fileOverlapAvailable = hasIncidentFiles && hasChangedFiles;
+  const testOverlapAvailable = failingTests.length > 0
+    && hasChangedFiles
+    && missingRelatedTests.length === 0;
+  const relatedTests = testOverlapAvailable ? failingTestsFor(commit, failingTests) : [];
   const incidentFiles = input.incidentFiles ?? [];
   const changedFiles = commit.changedFiles ?? [];
-  const fileMatches = intersection(changedFiles, incidentFiles);
+  const fileMatches = fileOverlapAvailable ? intersection(changedFiles, incidentFiles) : [];
   const diff = providedFactor(commit.diffRisk, `commit ${commit.sha} diffRisk`);
   const dependency = dependencyFactorFor(commit);
   const deploymentMs = deployment ? timestamp(deployment.timestamp, 'deployment timestamp') : null;
@@ -729,8 +775,8 @@ export function scoreCommit(commit, input, deploymentMatches) {
   const temporal = usableDeployment
     ? clamp(1 / (1 + Math.max(0, minutes) / 30))
     : 0;
-  const fileOverlap = incidentFiles.length ? clamp(fileMatches.length / setOf(incidentFiles).size) : 0;
-  const testOverlap = failingTests.length ? clamp(relatedTests.length / failingTests.length) : 0;
+  const fileOverlap = fileOverlapAvailable ? clamp(fileMatches.length / setOf(incidentFiles).size) : 0;
+  const testOverlap = testOverlapAvailable ? clamp(relatedTests.length / failingTests.length) : 0;
   const factors = {
     temporal,
     fileOverlap,
@@ -745,8 +791,8 @@ export function scoreCommit(commit, input, deploymentMatches) {
 
   const signalAvailability = {
     temporal: usableDeployment,
-    fileOverlap: incidentFiles.length > 0,
-    testOverlap: failingTests.length > 0,
+    fileOverlap: fileOverlapAvailable,
+    testOverlap: testOverlapAvailable,
     diffRisk: diff.provided,
     dependencyImpact: dependency.provided
   };
@@ -759,10 +805,27 @@ export function scoreCommit(commit, input, deploymentMatches) {
   const dependencyOrigin = dependency.origin;
   const signalSources = {
     temporal: usableDeployment ? 'derived' : 'missing',
-    fileOverlap: incidentFiles.length ? 'derived' : 'missing',
-    testOverlap: failingTests.length ? 'derived' : 'missing',
+    fileOverlap: fileOverlapAvailable ? 'derived' : 'missing',
+    testOverlap: testOverlapAvailable ? 'derived' : 'missing',
     diffRisk: diff.provided ? diffOrigin : 'missing',
     dependencyImpact: dependency.provided ? dependencyOrigin : 'missing'
+  };
+  const signalDetails = {
+    fileOverlap: {
+      state: overlapState(fileOverlapAvailable, fileMatches.length > 0),
+      source: fileOverlapAvailable ? 'incidentFiles+commit.changedFiles' : null,
+      ...(fileOverlapAvailable ? { matchingFiles: fileMatches } : {
+        reason: missingFileOverlapText({ hasIncidentFiles, hasChangedFiles })
+      })
+    },
+    testOverlap: {
+      state: overlapState(testOverlapAvailable, relatedTests.length > 0),
+      source: testOverlapAvailable ? 'tests.relatedFiles+commit.changedFiles' : null,
+      ...(testOverlapAvailable ? { relatedTests: relatedTests.map((test) => test.name) } : {
+        reason: missingTestOverlapText({ hasChangedFiles, failingTests, missingRelatedTests })
+      })
+    },
+    dependencyImpact: dependency.details
   };
   const evidence = [];
   if (deployment && usableDeployment) {
@@ -809,13 +872,23 @@ export function scoreCommit(commit, input, deploymentMatches) {
       source: 'incidentFiles',
       origin: 'derived'
     });
+  } else if (fileOverlapAvailable) {
+    evidence.push({
+      kind: 'no-file-overlap',
+      signal: 'fileOverlap',
+      state: 'observed_no_overlap',
+      weight: 0,
+      text: 'No changed-file overlap with the incident files was found.',
+      source: 'incidentFiles+commit.changedFiles',
+      origin: 'derived'
+    });
   } else {
     evidence.push({
       kind: 'missing-file-overlap',
+      signal: 'fileOverlap',
+      state: 'unknown',
       weight: 0,
-      text: incidentFiles.length
-        ? 'No changed-file overlap with the incident files was found.'
-        : 'No incident files were provided.',
+      text: missingFileOverlapText({ hasIncidentFiles, hasChangedFiles }),
       source: null,
       origin: 'missing'
     });
@@ -829,13 +902,23 @@ export function scoreCommit(commit, input, deploymentMatches) {
       source: `tests:${relatedTests.map((test) => test.name).join(',')}`,
       origin: 'derived'
     });
+  } else if (testOverlapAvailable) {
+    evidence.push({
+      kind: 'no-test-overlap',
+      signal: 'testOverlap',
+      state: 'observed_no_overlap',
+      weight: 0,
+      text: 'No failing test was directly connected to this commit.',
+      source: 'tests.relatedFiles+commit.changedFiles',
+      origin: 'derived'
+    });
   } else {
     evidence.push({
       kind: 'missing-test-overlap',
+      signal: 'testOverlap',
+      state: 'unknown',
       weight: 0,
-      text: failingTests.length
-        ? 'No failing test was directly connected to this commit.'
-        : 'No failing test data was provided.',
+      text: missingTestOverlapText({ hasChangedFiles, failingTests, missingRelatedTests }),
       source: null,
       origin: 'missing'
     });
@@ -883,13 +966,12 @@ export function scoreCommit(commit, input, deploymentMatches) {
     confidence,
     coverage,
     missingSignals,
+    signalAvailability,
     signalSources,
     factors,
     contributions,
     dependencyImpactDetails: dependency.details,
-    signalDetails: {
-      dependencyImpact: dependency.details
-    },
+    signalDetails,
     evidence,
     relatedTests: relatedTests.map((test) => ({
       name: test.name,
@@ -1195,6 +1277,14 @@ export function analyzeIncident(input) {
   }));
 
   const warnings = [];
+  const untimestampedFailedTests = (input.tests ?? [])
+    .filter((test) => test.status === 'failed' && test.timestamp === undefined);
+  if (untimestampedFailedTests.length) {
+    warnings.push(
+      `${untimestampedFailedTests.length} failed test result${untimestampedFailedTests.length === 1 ? '' : 's'} `
+      + 'lack a source timestamp and were not placed on the timeline; no timestamp was inferred.'
+    );
+  }
   if (!suspects.length) {
     warnings.push('No candidate commits fell inside the analysis window. Widen the window or check the incident timestamps.');
   } else if (suspects[0].confidence === 'low') {

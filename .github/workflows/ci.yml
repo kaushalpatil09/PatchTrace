@@ -27,13 +27,9 @@ jobs:
           cache: npm
       - name: Install
         run: npm ci --ignore-scripts
-      - name: Test
-        run: npm test
-      - name: Smoke
-        run: npm run smoke
-      - name: Doctor
-        run: node bin/patchtrace.mjs doctor --json
-      - name: Security audit
+      - name: Local check
+        run: npm run check
+      - name: Security audit (npm registry advisory data)
         if: matrix.os == 'ubuntu-latest' && matrix.node == 22
         run: npm run security
 

@@ -315,7 +315,7 @@ function renderDetails(suspect) {
     ${state.realVerificationEnabled ? `
       <div class="real-verify-block">
         <div class="eyebrow">REAL REPOSITORY VERIFICATION</div>
-        <p class="muted small">Runs in a temporary copy, reverts only that copy, and compares the baseline and candidate test runs. This is not a sandbox.</p>
+         <p class="muted small">The server reports the effective boundary for each run. Trusted-local temp-copy mode is not a sandbox; constrained Docker/Podman mode is required when a stronger boundary is configured and fails closed if it cannot be established.</p>
          <label class="field" for="repo-path">Repository path
            <input id="repo-path" name="repo-path" type="text" placeholder="D:\\path\\to\\repository" autocomplete="off" spellcheck="false">
          </label>
@@ -532,6 +532,18 @@ function renderVerificationResult(result, panel) {
   const fixture = result.status === 'complete';
   const cancelled = result.status === 'cancelled' || result.outcome === 'cancelled';
   const outcome = fixture ? 'fixture complete' : (result.outcome || result.status || 'unknown');
+  const isolation = result.isolation || (fixture ? 'fixture' : 'unknown');
+  const isolationBoundary = result.isolationBoundary || (fixture ? 'server-owned-fixture' : 'not-established');
+  const isolationNotice = result.isolationNotice
+    || (fixture
+      ? 'server-owned fixture data; no repository or test command was executed.'
+      : result.isolation === 'container'
+        ? (result.status === 'unsupported'
+          ? 'constrained Docker/Podman mode was requested but not established; production/container mode fails closed and never falls back to temp-copy.'
+          : 'constrained Docker/Podman container; networking is disabled and the source is mounted read-only.')
+        : result.isolation === 'temp-copy'
+          ? 'trusted-local temporary copy; best-effort boundary only, not a security sandbox.'
+          : 'No live verification boundary was established.');
   const positive = fixture || result.outcome === 'confirmed';
   const baseline = result.baseline;
   const candidate = result.candidate;
@@ -559,6 +571,7 @@ function renderVerificationResult(result, panel) {
     </div>
     <div class="verify-meta">
       <span>Outcome: ${escapeHtml(outcome)}</span>
+      <span>Mode: ${escapeHtml(isolation)} · boundary: ${escapeHtml(isolationBoundary)}</span>
       ${result.reason ? `<span>Reason: ${escapeHtml(result.reason)}</span>` : ''}
       ${Array.isArray(result.baselineRuns) && result.baselineRuns.length > 1 ? `<span>Baseline runs: ${escapeHtml(result.baselineRuns.map((run) => run.status).join(' → '))}</span>` : ''}
       ${result.revert ? `<span>Revert: ${escapeHtml(result.revert.status)}</span>` : ''}
@@ -568,9 +581,9 @@ function renderVerificationResult(result, panel) {
     ${result.sourceUnchanged === false ? '<p class="warning" role="alert">The source repository changed during verification. This result cannot be trusted.</p>' : ''}
     ${result.cleanup?.removed === false && !result.cleanup.skipped ? `<p class="warning" role="alert">Temporary workspace cleanup failed: ${escapeHtml(result.cleanup.error || 'unknown error')}</p>` : ''}
     ${outputBlock(baseline)}${outputBlock(candidate)}
-    <p class="verify-note">${fixture
+    <p class="verify-note">${escapeHtml(fixture
       ? 'This is fixture evidence, not a live test run and not proof of root cause.'
-      : 'This check supports or weakens the rollback hypothesis. It does not prove root cause, and the temporary-copy runner is not a sandbox.'}</p>`;
+      : `Isolation boundary: ${isolationNotice} This check supports or weakens the rollback hypothesis; it does not prove root cause.`)}</p>`;
   panel.focus({ preventScroll: true });
 }
 

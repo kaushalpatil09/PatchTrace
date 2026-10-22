@@ -45,11 +45,11 @@ function deploymentRowsForBundle(rows, environment) {
   });
 }
 
-function junitRowsForBundle(rows, incidentStart) {
+function junitRowsForBundle(rows) {
   return rows.map((result) => ({
     name: result.name,
     status: result.status,
-    ...(incidentStart ? { timestamp: incidentStart } : {}),
+    ...(result.timestamp !== undefined ? { timestamp: result.timestamp } : {}),
     ...(result.relatedFiles?.length ? { relatedFiles: [...result.relatedFiles] } : {}),
     ...(result.errorSignature ? { errorSignature: result.errorSignature } : {})
   }));
@@ -101,7 +101,7 @@ export function normalizeIncidentBundle(input, {
       throw new Error(`Could not parse JUnit XML: ${error.message}`);
     }
     const existing = ensureArray(bundle, 'tests', 'JUnit XML');
-    bundle.tests = [...existing, ...junitRowsForBundle(tests, bundle.incidentStart)];
+    bundle.tests = [...existing, ...junitRowsForBundle(tests)];
   }
 
   return bundle;

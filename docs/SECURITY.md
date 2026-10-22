@@ -40,7 +40,7 @@ These controls reduce cross-site request forgery, DNS-rebinding, and drive-by br
 
 ## Real verification boundary
 
-The default `temp-copy` runner is **best-effort isolation, not a sandbox**. The opt-in production mode replaces command execution with a constrained Docker/Podman container; it is a stronger boundary, but the container runtime, image, and host remain operator-controlled.
+The default `temp-copy` runner is trusted-local, **best-effort execution, not a security sandbox**. The opt-in production mode replaces command execution with a constrained Docker/Podman container; it is a stronger boundary, but the container runtime, image, and host remain operator-controlled.
 
 What the default `temp-copy` mode does:
 

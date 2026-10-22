@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import {
   analyzeIncident,
   assertValidIncident,
+  buildTimeline,
   deriveDependencyImpact,
   parseDeploymentCsv,
   parseJunitXml,
@@ -115,6 +116,76 @@ test('keeps incident-file overlap separate from test overlap', () => {
   assert.equal(suspect.factors.fileOverlap, 0.5);
   assert.equal(suspect.factors.testOverlap, 1);
   assert.equal(suspect.contributions.fileOverlap, 0.125);
+});
+
+test('marks overlap signals missing when a candidate has no changedFiles evidence', () => {
+  const input = structuredClone(fixture);
+  delete input.commits[0].changedFiles;
+
+  const suspect = analyzeIncident(input).suspects.find((item) => item.sha === input.commits[0].sha);
+  assert.equal(suspect.signalAvailability.fileOverlap, false);
+  assert.equal(suspect.signalAvailability.testOverlap, false);
+  assert.ok(suspect.missingSignals.includes('fileOverlap'));
+  assert.ok(suspect.missingSignals.includes('testOverlap'));
+  assert.equal(suspect.signalSources.fileOverlap, 'missing');
+  assert.equal(suspect.signalSources.testOverlap, 'missing');
+
+  const fileEvidence = suspect.evidence.find((item) => item.kind === 'missing-file-overlap');
+  const testEvidence = suspect.evidence.find((item) => item.kind === 'missing-test-overlap');
+  assert.equal(fileEvidence.origin, 'missing');
+  assert.match(fileEvidence.text, /changedFiles/);
+  assert.equal(testEvidence.origin, 'missing');
+  assert.match(testEvidence.text, /changedFiles/);
+});
+
+test('does not claim test-overlap availability when a failing test lacks relatedFiles', () => {
+  const input = structuredClone(fixture);
+  delete input.tests.find((test) => test.status === 'failed').relatedFiles;
+
+  const suspect = analyzeIncident(input).suspects.find((item) => item.sha === 'a81e7c2');
+  assert.equal(suspect.signalAvailability.fileOverlap, true);
+  assert.equal(suspect.signalAvailability.testOverlap, false);
+  assert.equal(suspect.missingSignals.includes('fileOverlap'), false);
+  assert.ok(suspect.missingSignals.includes('testOverlap'));
+  assert.equal(suspect.signalSources.fileOverlap, 'derived');
+  assert.equal(suspect.signalSources.testOverlap, 'missing');
+
+  const fileEvidence = suspect.evidence.find((item) => item.kind === 'file-overlap');
+  const testEvidence = suspect.evidence.find((item) => item.kind === 'missing-test-overlap');
+  assert.equal(fileEvidence.origin, 'derived');
+  assert.equal(testEvidence.origin, 'missing');
+  assert.match(testEvidence.text, /relatedFiles/);
+});
+
+test('treats explicit empty changedFiles and relatedFiles arrays as observed no-overlap', () => {
+  const input = structuredClone(fixture);
+  input.commits = [{ ...input.commits[0], changedFiles: [] }];
+  input.tests = [{
+    name: 'untagged failure',
+    status: 'failed',
+    timestamp: '2026-10-20T14:10:00Z',
+    relatedFiles: [],
+    errorSignature: 'failure with no related files'
+  }];
+
+  const suspect = analyzeIncident(input).suspects[0];
+  assert.equal(suspect.signalAvailability.fileOverlap, true);
+  assert.equal(suspect.signalAvailability.testOverlap, true);
+  assert.equal(suspect.factors.fileOverlap, 0);
+  assert.equal(suspect.factors.testOverlap, 0);
+  assert.equal(suspect.missingSignals.includes('fileOverlap'), false);
+  assert.equal(suspect.missingSignals.includes('testOverlap'), false);
+  assert.equal(suspect.signalSources.fileOverlap, 'derived');
+  assert.equal(suspect.signalSources.testOverlap, 'derived');
+  assert.equal(suspect.signalDetails.fileOverlap.state, 'observed_no_overlap');
+  assert.equal(suspect.signalDetails.testOverlap.state, 'observed_no_overlap');
+
+  const fileEvidence = suspect.evidence.find((item) => item.kind === 'no-file-overlap');
+  const testEvidence = suspect.evidence.find((item) => item.kind === 'no-test-overlap');
+  assert.equal(fileEvidence.origin, 'derived');
+  assert.match(fileEvidence.text, /No changed-file overlap/);
+  assert.equal(testEvidence.origin, 'derived');
+  assert.match(testEvidence.text, /No failing test/);
 });
 
 test('reports coverage, missing signals, contributions, and provided sources', () => {
@@ -234,6 +305,30 @@ test('parses self-closing, skipped, quoted, namespaced, and entity-encoded JUnit
   assert.deepEqual(results.map((result) => result.status), ['passed', 'skipped', 'failed', 'passed']);
   assert.equal(results[0].name, 'passes & stays passing');
   assert.equal(results[2].errorSignature, 'bad <value>');
+});
+
+test('does not fabricate timeline events for failed tests without timestamps', () => {
+  const input = {
+    incidentStart: '2026-10-20T14:00:00Z',
+    commits: [],
+    deployments: [],
+    tests: [
+      { name: 'untimed failure', status: 'failed', relatedFiles: [] },
+      { name: 'timed failure', status: 'failed', timestamp: '2026-10-20T14:10:00Z', relatedFiles: [] }
+    ],
+    incidentEvents: []
+  };
+  const timeline = buildTimeline(input);
+
+  assert.equal(timeline.some((event) => event.title === 'untimed failure failed'), false);
+  assert.equal(timeline.some((event) => event.title === 'timed failure failed'), true);
+  assert.ok(timeline.every((event) => typeof event.timestamp === 'string'));
+
+  const analysis = analyzeIncident({
+    ...fixture,
+    tests: input.tests
+  });
+  assert.ok(analysis.warnings.some((warning) => /lack a source timestamp.*not placed on the timeline.*no timestamp was inferred/i.test(warning)));
 });
 
 test('rejects malformed JUnit XML', () => {

@@ -55,7 +55,7 @@ Times must be ISO 8601 **with a timezone** (`Z` or `+02:00`). A timestamp withou
 | `incidentStart` | yes | timestamp | Start of the incident. Candidate commits must be at or before this time. |
 | `incidentEnd` | no | timestamp | Optional end of the incident window, used for timeline phases. |
 | `candidateWindowMinutes` | no | positive number | How far before `incidentStart` to look for commits. Default `1440` (24 hours). |
-| `incidentFiles` | no | string[] | Files implicated by incident evidence. Used for the file-overlap signal. |
+| `incidentFiles` | no | string[] | Files implicated by incident evidence. A non-empty array is required together with each candidate's `changedFiles` array to evaluate file overlap; an absent or empty array leaves that signal unavailable. |
 | `commits` | yes | commit[] | Candidate commits. May be empty when `--repo` enrichment is used. |
 | `deployments` | no | deployment[] | Deployment events. Missing deployments reduce confidence. |
 | `tests` | no | test[] | Test results. Only `failed` tests contribute. |
@@ -70,7 +70,7 @@ Times must be ISO 8601 **with a timezone** (`Z` or `+02:00`). A timestamp withou
 | `sha` | yes | string | Git commit SHA, 4–64 hex characters. |
 | `timestamp` | yes | timestamp | Commit time with timezone. |
 | `message` | yes | string | Commit subject. |
-| `changedFiles` | no | string[] | Repository-relative paths. Used for file and test overlap. |
+| `changedFiles` | no | string[] | Repository-relative paths. Required per candidate for file/test overlap evaluation. An omitted array means the candidate's overlap evidence is missing; an explicit empty array is observed evidence of no changed files and can produce observed no-overlap. |
 | `diffRisk` | no | 0–1 | Manual diff-size/risk signal, or the value derived by `--repo` enrichment. Missing means unavailable. |
 | `diffRiskSource` | no | string | `derived:git` when supplied by `--repo` enrichment. |
 | `dependencyImpact` | no | 0–1 | Explicit blast-radius signal, or the value derived from supported dependency files. Missing means unavailable. |
@@ -100,8 +100,8 @@ A deployment after `incidentStart` is shown as evidence but receives **zero** te
 | --- | --- | --- | --- |
 | `name` | yes | string | Test name used in evidence. |
 | `status` | yes | `passed`, `failed`, `skipped` | Only failures contribute. |
-| `timestamp` | no | timestamp | Used in the timeline; defaults to `incidentStart`. |
-| `relatedFiles` | no | string[] | Files connected to the test. Overlap with `changedFiles` produces the test-overlap signal. |
+| `timestamp` | no | timestamp | Used in the timeline when supplied. Imported test results do not receive a synthetic `incidentStart` timestamp; a missing value remains unknown rather than being treated as an event at incident start. |
+| `relatedFiles` | no | string[] | Files connected to the test. Every failing test must provide this field (including an explicit empty array) for that candidate's test-overlap signal to be available. An omitted field leaves the signal missing; an explicit empty array is observed no-related-file evidence and can produce observed no-overlap. |
 | `errorSignature` | no | string | Short failure signature displayed in evidence. |
 
 ## Incident event
@@ -154,6 +154,10 @@ When `commits` is empty, the repository commits inside the candidate window beco
 ## Ingestion provenance
 
 `patchtrace ingest` records an optional `provenance.ingestion` object in the generated bundle. Each imported artifact includes a SHA-256 hash, source path when supplied, parser name/version, artifact kind, and ingestion time. This metadata makes it possible to audit which local evidence produced a ranking; it may contain private filesystem paths and should be treated as sensitive.
+
+Imported JUnit rows preserve a timestamp only when the source row provides one. In particular, ingestion never substitutes `incidentStart` for a missing test timestamp, and timeline construction does not create a timestamped test event for an untimestamped failure. Explicit empty `relatedFiles` arrays in bundle input are retained so observed no-overlap remains distinguishable from missing test-file evidence; a JUnit row without a file attribute remains missing related-file evidence.
+
+When analysis skips an untimestamped failed test from the ordered timeline, it adds a warning naming the omitted evidence and states that no timestamp was inferred. The failed test can still contribute to overlap scoring only when its required file evidence is present.
 
 ## Security notes
 
