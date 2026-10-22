@@ -81,7 +81,13 @@ paths:
     post:
       operationId: analyzeIncident
       summary: Analyze an incident bundle
-      description: The request body is the incident bundle itself, not a wrapper. The request limit is 5 MiB.
+      description: |
+        The request body is the incident bundle itself, not a wrapper. The request limit is 5 MiB.
+        Raw analysis is sensitive and is not redacted. One analysis is admitted at a time,
+        with no queue. A worker has a 5 second execution budget and 128 MiB V8 old heap limit.
+        Work is limited to 250000 changed/related path references and 50000000 overlap visits.
+        Analysis output is limited to 16 MiB; related-test detail lists are capped at 20 per suspect,
+        with full counts and explicit truncation metadata. Scores use every matching test.
       requestBody:
         required: true
         content:
@@ -109,6 +115,18 @@ paths:
           $ref: '#/components/responses/BodyTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: analysis_limit - computational or output budget exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: analysis_busy, analysis_timeout, analysis_cancelled or analysis_failed. No automatic queue or retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/report:

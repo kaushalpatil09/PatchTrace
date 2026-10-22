@@ -46,6 +46,18 @@ See `docs/IMPLEMENTATION_STATUS.md` for what is verified and `docs/PRODUCTION_RE
 
 ## Next: production hardening
 
+- [x] Fix Markdown output injection and compound credential redaction with adversarial regressions.
+- [x] Index failed-test evidence, bound displayed details and isolate API analysis in a bounded worker.
+- [x] Reject non-ISO and rolled-over calendar timestamps.
+- [x] Add repeatable performance and synthetic ranking evaluation commands.
+- [x] Pin CI action commits and test a clean installed tarball.
+- [x] Preserve the old defect inventory in dated history and reconcile current defects.
+- [ ] Execute the new real-container integration gate on a working daemon; extend adversarial resource/process-tree/disconnect/shutdown coverage.
+- [ ] Enforce a container workspace disk quota; the current writable bind mount is not bounded by tmpfs limits.
+- [ ] Complete real-browser automation, axe, manual keyboard/zoom/contrast and screen-reader validation.
+- [ ] Supply independently reviewed historical cases; keep real-world ranking validation OPEN.
+- [ ] Execute the full supported platform/runtime CI matrix and validate release provenance/image updates.
+
 - [x] Add a constrained Docker/Podman verification runner behind the same result contract; live runtime validation remains a release gate and is not claimed without a daemon and image.
 - [x] Add hand-written API request/response contracts and OpenAPI 3.1 documentation.
 - [x] Add dependency-impact derivation from supported manifests/lockfiles and bounded diff churn (full source-level package graph remains deferred).

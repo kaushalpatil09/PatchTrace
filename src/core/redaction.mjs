@@ -6,7 +6,7 @@ const REDACTION_RULES = [
     replacement: '[redacted private key]'
   },
   {
-    pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bsk-[A-Za-z0-9]{20,}\b/g,
+    pattern: /\bgh[pousr]_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bsk-[A-Za-z0-9]{20,}\b|\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/g,
     replacement: '[redacted token]'
   },
   {
@@ -18,11 +18,12 @@ const REDACTION_RULES = [
     replacement: '[redacted jwt]'
   },
   {
-    pattern: /((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret|authorization)\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi,
-    replacement: '$1[redacted]'
+    pattern: /\b([A-Za-z_][A-Za-z0-9_-]*\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/g,
+    replacement: (match, prefix) => isSensitiveKey(prefix.replace(/\s*[:=]\s*$/, ''))
+      ? `${prefix}[redacted]` : match
   },
   {
-    pattern: /(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi,
+    pattern: /([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi,
     replacement: '$1[redacted]@'
   }
 ];
@@ -32,15 +33,18 @@ const SENSITIVE_KEY_NAMES = [
   'passwd',
   'pwd',
   'secret',
+  'secretkey',
   'token',
   'apikey',
   'accesskey',
+  'accountkey',
   'clientsecret',
   'authorization',
   'credential',
   'credentials',
   'privatekey',
-  'sshkey'
+  'sshkey',
+  'connectionstring'
 ];
 
 export const PATH_REPLACEMENT = '[path redacted]';
@@ -155,10 +159,13 @@ export function redactSecrets(value) {
   let text = String(value ?? '');
   let redactions = 0;
   for (const rule of REDACTION_RULES) {
-    const matches = text.match(rule.pattern);
-    if (!matches) continue;
-    redactions += matches.length;
-    text = text.replace(rule.pattern, rule.replacement);
+    text = text.replace(rule.pattern, (...args) => {
+      const replacement = typeof rule.replacement === 'function'
+        ? rule.replacement(...args)
+        : args[0].replace(new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', '')), rule.replacement);
+      if (replacement !== args[0]) redactions += 1;
+      return replacement;
+    });
   }
   return { text, redactions };
 }

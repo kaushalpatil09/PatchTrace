@@ -5,7 +5,8 @@ import { constants as fsConstants } from 'node:fs';
 import { extname, join, normalize, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { analyzeIncident, validateIncident, verifyFixture } from './src/core/analysis.mjs';
+import { validateIncident, verifyFixture } from './src/core/analysis.mjs';
+import { analyzeInWorker } from './src/analysis-service.mjs';
 import { buildReport } from './src/core/report.mjs';
 import { PATH_REPLACEMENT, scrubPathText } from './src/core/redaction.mjs';
 import { runCommand, sweepStaleWorkspaces, verifyRollback } from './src/core/verification.mjs';
@@ -478,6 +479,7 @@ export function createPatchTraceServer(options = {}) {
     .filter(Boolean);
   const allowed = createAllowedHosts(extraHosts);
   let realVerificationInFlight = false;
+  let currentAnalysis = null;
   let currentVerification = null;
 
   // Sweep only marked workspaces older than the stale threshold. This runs in the
@@ -551,13 +553,34 @@ export function createPatchTraceServer(options = {}) {
       }
 
       if (request.method === 'POST' && pathname === '/api/analyze') {
-        const input = await readJsonBody(request);
-        const validation = validateApiRequest('analyze', input);
-        if (!validation.valid) {
-          sendError(response, 400, 'invalid_bundle', 'The incident bundle is invalid.', validation.errors);
+        if (currentAnalysis) {
+          request.resume();
+          sendError(response, 503, 'analysis_busy', 'Another analysis is running. Try again when it finishes.');
           return;
         }
-        sendContract(response, 200, 'analyze', analyzeIncident(input));
+        const controller = new AbortController();
+        currentAnalysis = controller;
+        const abort = () => { if (!response.writableEnded) controller.abort(); };
+        request.once('aborted', abort);
+        response.once('close', abort);
+        try {
+          const input = await readJsonBody(request);
+          const validation = validateApiRequest('analyze', input);
+          if (!validation.valid) {
+            sendError(response, 400, 'invalid_bundle', 'The incident bundle is invalid.', validation.errors);
+            return;
+          }
+          const result = await analyzeInWorker(input, { signal: controller.signal });
+          sendContract(response, 200, 'analyze', result);
+        } catch (error) {
+          if (['analysis_limit', 'analysis_timeout', 'analysis_failed', 'analysis_cancelled'].includes(error.code)) {
+            sendError(response, error.code === 'analysis_limit' ? 422 : 503, error.code, error.message);
+          } else throw error;
+        } finally {
+          request.off('aborted', abort);
+          response.off('close', abort);
+          if (currentAnalysis === controller) currentAnalysis = null;
+        }
         return;
       }
 
@@ -680,7 +703,7 @@ export function createPatchTraceServer(options = {}) {
         sendError(response, error.status, error.code || 'request_error', error.message, error.errors);
         return;
       }
-      console.error(error);
+      console.error('PatchTrace request failed: internal_error');
       sendError(response, 500, 'internal_error', 'The request could not be completed.');
     }
   });
@@ -694,7 +717,8 @@ export function createPatchTraceServer(options = {}) {
     token,
     enableRealVerification,
     allowedHosts: allowed.hosts,
-    cancelVerification: () => currentVerification?.abort()
+    cancelVerification: () => currentVerification?.abort(),
+    cancelAnalysis: () => currentAnalysis?.abort()
   };
 }
 
@@ -730,6 +754,7 @@ if (isMain) {
     if (shuttingDown) return;
     shuttingDown = true;
     app.cancelVerification();
+    app.cancelAnalysis();
     app.server.close(() => process.exit(0));
     app.server.closeIdleConnections?.();
     setTimeout(() => process.exit(1), 5_000).unref();

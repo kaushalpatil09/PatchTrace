@@ -44,6 +44,8 @@ A PatchTrace incident bundle is a local JSON file. It is untrusted input: the an
 
 Times must be ISO 8601 **with a timezone** (`Z` or `+02:00`). A timestamp without a zone is rejected because the analysis must not depend on the machine's local timezone.
 
+Use a full date and time including seconds. Invalid calendar dates, hour 24, leap-second notation and invalid offset components are rejected rather than normalized. Fractional seconds and compact offsets such as `+0530` are supported. Total commit/test path references are limited to 250,000 and estimated overlap visits to 50,000,000. Analysis can reject an otherwise schema-valid bundle that exceeds its workload budget.
+
 ## Top-level fields
 
 | Field | Required | Type | Meaning |

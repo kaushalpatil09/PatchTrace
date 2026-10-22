@@ -98,4 +98,6 @@ Confidence is deliberately conservative: high confidence requires both a high sc
 
 ## Technical trade-off
 
+HTTP analysis runs in a single bounded worker thread through `src/analysis-service.mjs`; the CLI still calls the framework-independent synchronous core. The core builds a failed-test path index once and preserves input ordering/identity, full-count scores, and missing-versus-empty semantics. Bounded detail lists prevent dense evidence from being replicated without limit in JSON. Worker admission, cancellation, time, V8 heap and output-size policies are described in `API.md`. Report rendering and request/response JSON work still run on the HTTP thread and need further scale tests.
+
 The implementation uses Node.js built-ins and a dependency-free browser UI so it stays portable, offline, and easy to audit. The cost is more hand-written validation and a smaller ecosystem. Do not introduce a framework or database until it buys a concrete user-visible capability; the current bottleneck is verification isolation and evidence quality, not web plumbing.

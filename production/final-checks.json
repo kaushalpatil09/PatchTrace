@@ -1,0 +1,9 @@
+{
+  "install": 0,
+  "tests": 0,
+  "smoke": 0,
+  "doctor": 0,
+  "security": 0,
+  "coverage": 0,
+  "container": 1
+}

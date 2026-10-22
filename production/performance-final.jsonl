@@ -1,0 +1,9 @@
+
+> patchtrace@0.1.0 benchmark
+> node scripts/benchmark-analysis.mjs
+
+{"node":"v24.13.0","platform":"win32","cpu":"13th Gen Intel(R) Core(TM) i5-13450HX"}
+{"name":"small","commits":10,"tests":20,"paths":2,"bytes":3470,"medianMs":0.920499999999997,"maxMs":3.962299999999999,"maxEventLoopDelayMs":21.889023,"rssBytes":51253248}
+{"name":"typical","commits":100,"tests":500,"paths":5,"bytes":98140,"medianMs":3.684100000000001,"maxMs":5.38839999999999,"maxEventLoopDelayMs":28.688383,"rssBytes":59375616}
+{"name":"large","commits":400,"tests":2000,"paths":50,"bytes":2439240,"medianMs":54.120299999999986,"maxMs":65.33349999999999,"maxEventLoopDelayMs":170.786815,"rssBytes":131878912}
+{"name":"dense","commits":400,"tests":2000,"paths":50,"bytes":2188560,"medianMs":255.5643,"maxMs":261.8199000000001,"maxEventLoopDelayMs":786.956287,"rssBytes":196734976}

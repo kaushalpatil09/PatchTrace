@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { analyzeIncident, validateIncident } from '../src/core/analysis.mjs';
+import { analyzeIncident, parseTimestamp, validateIncident } from '../src/core/analysis.mjs';
 import { parseTestCommand } from '../src/core/command-line.mjs';
 import { prepareContainerRuntime } from '../src/core/container-runner.mjs';
 import { enrichIncidentFromRepository } from '../src/core/git-adapter.mjs';
@@ -15,7 +15,6 @@ import { runCommand, sweepStaleWorkspaces, verifyRollback } from '../src/core/ve
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const VERSION = packageJson.version || '0.1.0';
 const MAX_INPUT_BYTES = 5 * 1024 * 1024;
-const ISO_WITH_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
 class CliError extends Error {
   constructor(message, exitCode = 2) {
@@ -100,7 +99,9 @@ function parseInteger(value, label, { min = 1, max = Number.MAX_SAFE_INTEGER } =
 
 function parseGeneratedAt(value) {
   if (!value) return new Date().toISOString();
-  if (!ISO_WITH_ZONE.test(value) || Number.isNaN(Date.parse(value))) {
+  try {
+    parseTimestamp(value);
+  } catch {
     throw new CliError('--generated-at must be an ISO 8601 timestamp with a timezone.', 2);
   }
   return value;

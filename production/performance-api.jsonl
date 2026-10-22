@@ -1,0 +1,7 @@
+
+> patchtrace@0.1.0 benchmark:api
+> node scripts/benchmark-api.mjs
+
+{"run":0,"analysisMs":448.6559,"healthMs":66.8776,"controlMs":3.3837000000000046,"healthBeforeAnalysisFinished":true}
+{"run":1,"analysisMs":414.4403000000001,"healthMs":44.113599999999906,"controlMs":1.5059999999999718,"healthBeforeAnalysisFinished":true}
+{"run":2,"analysisMs":418.7937999999999,"healthMs":48.408399999999915,"controlMs":1.718599999999924,"healthBeforeAnalysisFinished":true}

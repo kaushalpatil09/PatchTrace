@@ -37,7 +37,7 @@ test('renders an inspectable Markdown report with caveats and evidence', () => {
   assert.match(markdown, /## Timeline/);
   assert.match(markdown, /2026-10-20T11:30:00Z/);
   assert.match(markdown, /Commit 12fa0b1 recorded/);
-  assert.match(markdown, /source: `deployment:a81e7c2`/);
+  assert.match(markdown, /source: deployment:a81e7c2/);
   assert.match(markdown, /Why this ranks below the top suspect/);
   assert.match(markdown, /weaker file-overlap evidence/i);
   assert.match(markdown, /## Uncertainty and limits/);

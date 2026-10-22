@@ -3,6 +3,9 @@
 .github
 .omnirush
 node_modules
+.cache
+tmp
+production
 npm-debug.log*
 .env
 .env.*

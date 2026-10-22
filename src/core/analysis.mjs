@@ -1,6 +1,6 @@
 const MINUTE_MS = 60 * 1000;
 const DEFAULT_CANDIDATE_WINDOW_MINUTES = 24 * 60;
-const ISO_WITH_ZONE = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+const ISO_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):?(\d{2}))$/i;
 const SHA_PATTERN = /^[0-9a-f]{4,64}$/i;
 const MAX_COMMITS = 2000;
 const MAX_DEPLOYMENTS = 2000;
@@ -13,6 +13,7 @@ const MAX_JUNIT_TAGS = 10_000;
 const MAX_JUNIT_DEPTH = 256;
 const MAX_WHY_NOT_REASONS = 5;
 const MAX_DEPENDENCY_DETAIL_FILES = 100;
+const MAX_RELATED_TEST_DETAILS = 20;
 
 const DEPENDENCY_FILE_RULES = Object.freeze([
   { ecosystem: 'node', kind: 'manifest', pattern: /(^|\/)package\.json$/i },
@@ -108,8 +109,14 @@ function timestamp(value, label = 'timestamp') {
     throw new Error(`Invalid ${label}: expected an ISO 8601 timestamp with a timezone, for example 2026-10-20T14:00:00Z.`);
   }
   const parsed = Date.parse(value);
-  if (Number.isNaN(parsed)) {
-    throw new Error(`Invalid ${label}: ${value}`);
+  const [, year, month, day, hour, minute, second, offsetHour = '0', offsetMinute = '0'] = value.match(ISO_WITH_ZONE);
+  const y = Number(year);
+  const days = [31, y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (Number.isNaN(parsed) || Number(month) < 1 || Number(month) > 12
+    || Number(day) < 1 || Number(day) > days[Number(month) - 1]
+    || Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59
+    || Number(offsetHour) > 23 || Number(offsetMinute) > 59) {
+    throw new Error(`Invalid ${label}: expected a real calendar date and time with a timezone.`);
   }
   return parsed;
 }
@@ -117,6 +124,8 @@ function timestamp(value, label = 'timestamp') {
 function signedMinutesBetween(later, earlier) {
   return (later - earlier) / MINUTE_MS;
 }
+
+export { timestamp as parseTimestamp };
 
 function setOf(values = []) {
   return new Set(values.map((value) => String(value).replaceAll('\\', '/')));
@@ -280,9 +289,47 @@ function deploymentFor(commit, environment, incidentMs, deploymentMatches) {
   return matches.find((deployment) => timestamp(deployment.timestamp) <= incidentMs) ?? matches[0];
 }
 
-function failingTestsFor(commit, failingTests) {
-  const changedFiles = commit.changedFiles ?? [];
-  return failingTests.filter((test) => intersection(changedFiles, test.relatedFiles ?? []).length > 0);
+function scoringContext(input) {
+  const failingTests = (input.tests ?? []).filter((test) => test.status === 'failed');
+  const testsByFile = new Map();
+  let pathReferences = 0;
+  const addPaths = (paths) => {
+    pathReferences += paths?.length ?? 0;
+    if (pathReferences > 250_000) throw analysisLimitError();
+  };
+  for (const commit of input.commits ?? []) addPaths(commit.changedFiles);
+  for (const test of input.tests ?? []) addPaths(test.relatedFiles);
+  for (const [index, test] of failingTests.entries()) {
+    for (const file of setOf(test.relatedFiles ?? [])) {
+      if (!testsByFile.has(file)) testsByFile.set(file, []);
+      testsByFile.get(file).push(index);
+    }
+  }
+  // Conservative upper bound on postings visited, before candidate scoring/output.
+  let visits = 0;
+  for (const commit of input.commits ?? []) {
+    for (const file of setOf(commit.changedFiles ?? [])) {
+      visits += testsByFile.get(file)?.length ?? 0;
+      if (visits > 50_000_000) throw analysisLimitError();
+    }
+  }
+  return { failingTests, testsByFile,
+    missingRelatedTests: failingTests.filter((test) => !Array.isArray(test.relatedFiles)) };
+}
+
+function analysisLimitError() {
+  const error = new Error('Analysis exceeds the workload budget (250000 path references or 50000000 overlap visits). Narrow the bundle.');
+  error.code = 'analysis_limit';
+  return error;
+}
+
+function failingTestsFor(commit, context) {
+  const indexes = new Set();
+  for (const file of setOf(commit.changedFiles ?? [])) {
+    for (const index of context.testsByFile.get(file) ?? []) indexes.add(index);
+  }
+  // Preserve input test order and count each test once even if multiple files match.
+  return [...indexes].sort((a, b) => a - b).map((index) => context.failingTests[index]);
 }
 
 function overlapState(available, hasOverlap) {
@@ -744,24 +791,22 @@ export function buildTimeline(input) {
     .map(({ timestampMs, ...event }) => event);
 }
 
-export function scoreCommit(commit, input, deploymentMatches) {
+export function scoreCommit(commit, input, deploymentMatches, context = scoringContext(input)) {
   const incidentMs = timestamp(input.incidentStart, 'incidentStart');
   const commitMs = timestamp(commit.timestamp, `commit ${commit.sha} timestamp`);
-  const knownCommitShas = Array.isArray(input.commits)
-    ? input.commits.map((candidate) => candidate?.sha)
-    : [commit.sha];
   const resolvedDeployments = deploymentMatches
-    ?? createDeploymentMatches(input.deployments ?? [], [...knownCommitShas, commit.sha], input.environment);
+    ?? createDeploymentMatches(input.deployments ?? [], [...(input.commits ?? []).map((candidate) => candidate?.sha), commit.sha], input.environment);
   const deployment = deploymentFor(commit, input.environment, incidentMs, resolvedDeployments);
-  const failingTests = (input.tests ?? []).filter((test) => test.status === 'failed');
+  const { failingTests, missingRelatedTests } = context;
   const hasIncidentFiles = Array.isArray(input.incidentFiles) && input.incidentFiles.length > 0;
   const hasChangedFiles = Array.isArray(commit.changedFiles);
-  const missingRelatedTests = failingTests.filter((test) => !Array.isArray(test.relatedFiles));
   const fileOverlapAvailable = hasIncidentFiles && hasChangedFiles;
   const testOverlapAvailable = failingTests.length > 0
     && hasChangedFiles
     && missingRelatedTests.length === 0;
-  const relatedTests = testOverlapAvailable ? failingTestsFor(commit, failingTests) : [];
+  const relatedTests = testOverlapAvailable ? failingTestsFor(commit, context) : [];
+  const relatedTestDetails = relatedTests.slice(0, MAX_RELATED_TEST_DETAILS);
+  const relatedTestsTruncated = relatedTestDetails.length < relatedTests.length;
   const incidentFiles = input.incidentFiles ?? [];
   const changedFiles = commit.changedFiles ?? [];
   const fileMatches = fileOverlapAvailable ? intersection(changedFiles, incidentFiles) : [];
@@ -821,7 +866,8 @@ export function scoreCommit(commit, input, deploymentMatches) {
     testOverlap: {
       state: overlapState(testOverlapAvailable, relatedTests.length > 0),
       source: testOverlapAvailable ? 'tests.relatedFiles+commit.changedFiles' : null,
-      ...(testOverlapAvailable ? { relatedTests: relatedTests.map((test) => test.name) } : {
+      ...(testOverlapAvailable ? { relatedTests: relatedTestDetails.map((test) => test.name),
+        ...(relatedTestsTruncated ? { relatedTestCount: relatedTests.length, truncated: true } : {}) } : {
         reason: missingTestOverlapText({ hasChangedFiles, failingTests, missingRelatedTests })
       })
     },
@@ -898,8 +944,8 @@ export function scoreCommit(commit, input, deploymentMatches) {
     evidence.push({
       kind: 'test-overlap',
       weight: testOverlap,
-      text: `Related failing test: ${relatedTests.map((test) => test.name).join(', ')}.`,
-      source: `tests:${relatedTests.map((test) => test.name).join(',')}`,
+      text: `Related failing test: ${relatedTestDetails.map((test) => test.name).join(', ')}${relatedTestsTruncated ? ` (and ${relatedTests.length - relatedTestDetails.length} more; details truncated)` : ''}.`,
+      source: `tests:${relatedTestDetails.map((test) => test.name).join(',')}`,
       origin: 'derived'
     });
   } else if (testOverlapAvailable) {
@@ -973,7 +1019,8 @@ export function scoreCommit(commit, input, deploymentMatches) {
     dependencyImpactDetails: dependency.details,
     signalDetails,
     evidence,
-    relatedTests: relatedTests.map((test) => ({
+    ...(relatedTestsTruncated ? { relatedTestCount: relatedTests.length, relatedTestsTruncated: true } : {}),
+    relatedTests: relatedTestDetails.map((test) => ({
       name: test.name,
       errorSignature: test.errorSignature,
       relatedFiles: test.relatedFiles
@@ -1254,6 +1301,7 @@ export function assertValidIncident(input) {
 
 export function analyzeIncident(input) {
   assertValidIncident(input);
+  const context = scoringContext(input);
   const incidentMs = timestamp(input.incidentStart, 'incidentStart');
   const windowMinutes = input.candidateWindowMinutes ?? DEFAULT_CANDIDATE_WINDOW_MINUTES;
   const windowStartMs = incidentMs - windowMinutes * MINUTE_MS;
@@ -1265,7 +1313,7 @@ export function analyzeIncident(input) {
   const timeline = buildTimeline(input);
   const deploymentMatches = createDeploymentMatches(input.deployments ?? [], allCommits.map((commit) => commit.sha), input.environment);
   const rankedSuspects = candidates
-    .map((commit) => scoreCommit(commit, input, deploymentMatches))
+    .map((commit) => scoreCommit(commit, input, deploymentMatches, context))
     .sort((a, b) => b.score - a.score
       || b.contributions.temporal - a.contributions.temporal
       || timestamp(a.timestamp) - timestamp(b.timestamp)

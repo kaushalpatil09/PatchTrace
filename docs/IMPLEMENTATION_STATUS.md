@@ -2,7 +2,19 @@
 
 This page records what is actually built, what is verified by tests, and what remains. It is not a substitute for the full production specification in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
+
+## Current hardening evidence
+
+See [the dated audit](PRODUCTION_AUDIT_2026-10-22.md) for the exact baseline, commands, PT findings and blocked gates. The original uploaded audit documents remain unchanged.
+
+- Literal Markdown output encoding and compound secret-key redaction now have adversarial and canary regression coverage. Reports include an explicit best-effort redaction policy; review every export before sharing.
+- Failed tests are indexed by slash-normalized file path once per analysis. Score inputs still include all related tests; detail lists retain the first 20 in input order and report full counts/truncation when necessary.
+- HTTP analysis has one worker slot, no queue, a 5 second worker budget, a 128 MiB V8 old-heap limit and a 16 MiB result limit. Worker failures, timeout, disconnect and shutdown cancellation are handled. Path-reference and overlap-visit budgets apply to the pure engine too.
+- Timestamp validation now rejects non-ISO text, invalid calendar dates and invalid time/offset components. CLI report timestamps use the same parser.
+- Offline evaluation supports exact labeled SHAs, development/holdout splits, Top-1/Top-3/MRR, abstention, simple baselines and failure cases. The six bundled scenarios are related synthetic variations, not independent historical evidence. External validation remains OPEN.
+- CI actions are pinned to full commits; a clean tarball install/CLI check and a real constrained-runner job are defined. Local container execution is blocked by the unavailable Docker daemon. CI execution is not claimed.
+- Browser sample loading, hostile-string import, candidate selection and fixture labeling were checked in the in-app browser. A horizontal overflow found during that review was fixed. Full automated E2E and WCAG/assistive-technology validation remain open.
 
 ## Implemented and tested
 

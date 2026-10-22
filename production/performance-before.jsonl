@@ -1,0 +1,5 @@
+{"node":"v24.13.0","platform":"win32","cpu":"13th Gen Intel(R) Core(TM) i5-13450HX"}
+{"name":"small","commits":10,"tests":20,"paths":2,"bytes":3470,"medianMs":1.268899999999988,"maxMs":3.8234999999999957,"maxEventLoopDelayMs":24.854527,"rssBytes":40071168}
+{"name":"typical","commits":100,"tests":500,"paths":5,"bytes":98140,"medianMs":45.1662,"maxMs":49.00510000000001,"maxEventLoopDelayMs":150.863871,"rssBytes":47706112}
+{"name":"large","commits":400,"tests":2000,"paths":50,"bytes":2439240,"medianMs":13226.435500000001,"maxMs":13251.462399999997,"maxEventLoopDelayMs":37480.300543,"rssBytes":131743744}
+{"name":"dense","commits":400,"tests":2000,"paths":50,"bytes":2188560,"medianMs":11780.174400000004,"maxMs":12220.7091,"maxEventLoopDelayMs":31910.264831,"rssBytes":428146688}

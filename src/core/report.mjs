@@ -12,14 +12,19 @@ function md(value) {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replaceAll('|', '\\|')
-    .replaceAll('`', '\\`')
-    .replace(/\r?\n/g, '<br>');
+    // Entities render as literal punctuation without being reparsed as Markdown.
+    // Encode backslashes too, so they cannot undo the encoding of adjacent text.
+    .replace(/[\\`*_[\]{}()!#|~]/g, (character) => `&#${character.codePointAt(0)};`)
+    .replace(/:\/\//g, '&#58;//')
+    .replace(/[\r\n\u2028\u2029]+/g, '<br>')
+    .replace(/^(\s*)([-+=]|\d+\.)/, (_, whitespace, marker) => whitespace
+      + [...marker].map(character => `&#${character.codePointAt(0)};`).join(''))
+    .replace(/^[ \t]+/, whitespace => [...whitespace].map(character => `&#${character.codePointAt(0)};`).join(''));
 }
 
 function csv(value) {
   let text = redacted(value);
-  if (/^\s*[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  if (/^[\s\u200b-\u200f\u202a-\u202e\u2060-\u206f]*[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
@@ -40,7 +45,7 @@ function percent(value) {
 function evidenceLines(suspect) {
   return (suspect.evidence ?? []).map((item) => {
     const origin = item.origin ? `origin: ${md(item.origin)}` : 'origin: unspecified';
-    const source = item.source ? `source: \`${md(item.source)}\`` : 'source: unavailable';
+    const source = item.source ? `source: ${md(item.source)}` : 'source: unavailable';
     return `- ${md(item.text)} _(${origin}; ${source})_`;
   }).join('\n');
 }
@@ -78,6 +83,7 @@ export function buildReport({
     provenance: safeProvenance.value,
     redaction: {
       applied: true,
+      policy: 'Best-effort secret and path processing ran; review before sharing. Unknown secrets may remain.',
       matches: safeAnalysis.redactions
         + (safeVerification?.redactions ?? 0)
         + safeProvenance.redactions
@@ -112,7 +118,7 @@ export function renderMarkdown(report) {
   }
   lines.push(`- Incident start: ${md(incident.incidentStart)}`);
   lines.push(`- Environment: ${md(incident.environment)}`);
-  lines.push(`- Candidate window: ${candidateWindowMinutes} minutes (${excludedCandidateCount} commits excluded)`);
+  lines.push(`- Candidate window: ${md(candidateWindowMinutes)} minutes (${md(excludedCandidateCount)} commits excluded)`);
   if (repository) {
     lines.push(`- Repository: ${md(repository.branch || 'detached')} at ${md(repository.head)} (${repository.dirty ? 'dirty' : 'clean'})`);
   }
@@ -132,7 +138,7 @@ export function renderMarkdown(report) {
     lines.push('| UTC | Phase | Kind | Event | Detail | Reference | Source |');
     lines.push('| --- | --- | --- | --- | --- | --- | --- |');
     for (const event of timeline) {
-      lines.push(`| ${md(event.timestamp)} | ${md(event.phase)} | ${md(event.kind)} | ${md(event.title)} | ${md(event.detail)} | ${event.commitSha ? `\`${md(event.commitSha)}\`` : '—'} | ${md(event.source)} |`);
+      lines.push(`| ${md(event.timestamp)} | ${md(event.phase)} | ${md(event.kind)} | ${md(event.title)} | ${md(event.detail)} | ${event.commitSha ? md(event.commitSha) : '—'} | ${md(event.source)} |`);
     }
     lines.push('');
   }
@@ -150,13 +156,13 @@ export function renderMarkdown(report) {
     lines.push('| — | — | — | — | — | No candidate commits |');
   } else {
     suspects.forEach((suspect, index) => {
-      lines.push(`| ${index + 1} | \`${md(suspect.sha)}\` | ${md(suspect.confidence)} | ${suspect.score.toFixed(3)} | ${percent(suspect.coverage)} | ${md(suspect.message)} |`);
+      lines.push(`| ${index + 1} | ${md(suspect.sha)} | ${md(suspect.confidence)} | ${suspect.score.toFixed(3)} | ${percent(suspect.coverage)} | ${md(suspect.message)} |`);
     });
   }
   lines.push('');
 
   for (const [index, suspect] of suspects.entries()) {
-    lines.push(`### ${index + 1}. \`${md(suspect.sha)}\` — ${md(suspect.message)}`, '');
+    lines.push(`### ${index + 1}. ${md(suspect.sha)} — ${md(suspect.message)}`, '');
     lines.push(`Score **${suspect.score.toFixed(3)}** · ${md(suspect.confidence)} confidence · ${percent(suspect.coverage)} evidence coverage.`);
     lines.push('');
     lines.push('| Signal | Value | Contribution | Source |');
@@ -183,7 +189,7 @@ export function renderMarkdown(report) {
       lines.push(`- Source unchanged: ${verification.sourceUnchanged ? 'yes' : 'no'}`);
     }
     if (Array.isArray(verification.testCommand) && verification.testCommand.length) {
-      lines.push(`- Test command: \`${md(verification.testCommand.join(' '))}\``);
+      lines.push(`- Test command: ${md(verification.testCommand.join(' '))}`);
     }
     if (verification.baseline) {
       const runCount = Array.isArray(verification.baselineRuns) ? verification.baselineRuns.length : 1;

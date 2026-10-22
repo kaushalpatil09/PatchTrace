@@ -13,6 +13,17 @@ import {
 
 const fixture = JSON.parse(await readFile(new URL('../fixtures/sample-incident/manifest.json', import.meta.url)));
 
+test('rejects permissively parsed non-ISO dates, calendar rollover and invalid offsets without echoing input', () => {
+  for (const value of ['API_SECRET_KEY=CANARY-ERROR-01234Z', 'Oct 20 2026 14:00:00Z',
+    '2026-02-30T14:00:00Z', '2025-02-29T14:00:00Z', '2026-10-20T24:00:00Z',
+    '2026-10-20T14:00:00+24:00', '2026-10-20T14:00:00+05:60']) {
+    const result = validateIncident({ ...fixture, incidentStart: value });
+    assert.equal(result.valid, false, value);
+    assert.ok(!JSON.stringify(result.errors).includes('CANARY-ERROR'));
+  }
+  assert.equal(validateIncident({ ...fixture, incidentStart: '2024-02-29T14:00:00+05:30' }).valid, true);
+});
+
 test('does not give temporal credit to a deployment after the incident', () => {
   const input = {
     ...fixture,

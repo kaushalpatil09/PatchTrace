@@ -631,8 +631,8 @@ async function downloadAnalysis() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     const matches = Number(body.redaction?.matches) || 0;
     setStatus(matches
-      ? `Report downloaded. ${matches} likely secret${matches === 1 ? '' : 's'} replaced.`
-      : 'Report downloaded. No likely secrets matched the redaction rules.');
+      ? `Report downloaded. ${matches} likely secret${matches === 1 ? '' : 's'} replaced. Review before sharing; unknown secrets may remain.`
+      : 'Report downloaded. Best-effort redaction ran. Review before sharing; unknown secrets may remain.');
   } catch (error) {
     setStatus(error.message, 'error');
   } finally {

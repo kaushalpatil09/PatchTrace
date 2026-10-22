@@ -1,0 +1,165 @@
+
+> patchtrace@0.1.0 evaluate
+> node scripts/evaluate-ranking.mjs
+
+{
+  "schemaVersion": 1,
+  "externalValidation": "OPEN",
+  "methodology": "Exact labeled SHA matching; low confidence abstains. Rank metrics include abstained cases. Deployment baseline orders eligible candidates by temporal factor. Holdout is reported separately; synthetic cases do not validate real-world effectiveness.",
+  "all": {
+    "size": 6,
+    "coverage": 1,
+    "abstentionRate": 0,
+    "methods": {
+      "patchtrace": {
+        "top1": 1,
+        "top3": 1,
+        "mrr": 1
+      },
+      "latestEligible": {
+        "top1": 0,
+        "top3": 1,
+        "mrr": 0.5
+      },
+      "deployedCommit": {
+        "top1": 0,
+        "top3": 0.5,
+        "mrr": 0.25
+      },
+      "fileOverlap": {
+        "top1": 0.8333333333333334,
+        "top3": 1,
+        "mrr": 0.888888888888889
+      }
+    }
+  },
+  "development": {
+    "size": 2,
+    "coverage": 1,
+    "abstentionRate": 0,
+    "methods": {
+      "patchtrace": {
+        "top1": 1,
+        "top3": 1,
+        "mrr": 1
+      },
+      "latestEligible": {
+        "top1": 0,
+        "top3": 1,
+        "mrr": 0.5
+      },
+      "deployedCommit": {
+        "top1": 0,
+        "top3": 1,
+        "mrr": 0.5
+      },
+      "fileOverlap": {
+        "top1": 1,
+        "top3": 1,
+        "mrr": 1
+      }
+    }
+  },
+  "holdout": {
+    "size": 4,
+    "coverage": 1,
+    "abstentionRate": 0,
+    "methods": {
+      "patchtrace": {
+        "top1": 1,
+        "top3": 1,
+        "mrr": 1
+      },
+      "latestEligible": {
+        "top1": 0,
+        "top3": 1,
+        "mrr": 0.5
+      },
+      "deployedCommit": {
+        "top1": 0,
+        "top3": 0.25,
+        "mrr": 0.125
+      },
+      "fileOverlap": {
+        "top1": 0.75,
+        "top3": 1,
+        "mrr": 0.8333333333333333
+      }
+    }
+  },
+  "rows": [
+    {
+      "id": "demo",
+      "split": "development",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": 2,
+        "fileOverlap": 1
+      }
+    },
+    {
+      "id": "no-tests",
+      "split": "development",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": 2,
+        "fileOverlap": 1
+      }
+    },
+    {
+      "id": "no-deployments",
+      "split": "holdout",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": null,
+        "fileOverlap": 1
+      }
+    },
+    {
+      "id": "no-file-evidence",
+      "split": "holdout",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": 2,
+        "fileOverlap": 3
+      }
+    },
+    {
+      "id": "environment-mismatch",
+      "split": "holdout",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": null,
+        "fileOverlap": 1
+      }
+    },
+    {
+      "id": "post-incident-deployment",
+      "split": "holdout",
+      "synthetic": true,
+      "abstained": false,
+      "ranks": {
+        "patchtrace": 1,
+        "latestEligible": 2,
+        "deployedCommit": null,
+        "fileOverlap": 1
+      }
+    }
+  ],
+  "failureCases": []
+}

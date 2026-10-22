@@ -105,6 +105,12 @@ Success: `200` with the analysis object, including `schemaVersion`, `incident`, 
 
 Invalid bundle: `400` with `error.code = "invalid_bundle"` and field paths.
 
+Raw analysis includes incident strings and may include local paths or credentials. Treat it as sensitive; use `/api/report` for best-effort redacted exports and review them before sharing.
+
+One analysis is admitted at a time, including body reading; no queue is retained. Concurrent analysis receives `503 analysis_busy`. The CPU phase runs in a worker with a 5 second budget and a 128 MiB V8 old-heap limit (not a total process-memory guarantee). Disconnect and shutdown cancel active analysis. The pure engine rejects more than 250,000 total commit/test path references or 50,000,000 estimated overlap postings with `analysis_limit`; HTTP maps that code to `422`. Worker output exceeding 16 MiB also returns `422 analysis_limit`. Timeout, worker failure and cancellation return `503` with `analysis_timeout`, `analysis_failed` or `analysis_cancelled` when the client is still connected. These limits are conservative bounds, not a latency SLA for every machine. JSON parsing, response serialization/transfer and reports still use the main thread.
+
+Scores use every matched failing test. Each suspect displays at most 20 related-test details in input order. When capped, `relatedTestCount` gives the full count, `relatedTestsTruncated` is true, and `signalDetails.testOverlap` has `relatedTestCount` and `truncated: true`. Evidence text explicitly says details were truncated. Existing small-fixture scores and output semantics are preserved.
+
 ### `POST /api/report`
 
 Builds a versioned report from an analysis response and an optional verification result. The server supplies `generatedAt` and `toolVersion`; the request body is:

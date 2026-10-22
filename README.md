@@ -102,7 +102,9 @@ The following capabilities are implemented in the repository:
 
 ## Screenshots and visual demonstration
 
-The repository does not currently contain captured browser screenshots or a demo recording. To avoid presenting a fabricated screenshot as product output, the README uses purpose-built SVG illustrations based on the actual UI, source modules, and sample fixture.
+The 2026-10-22 hardening pass adds literal Markdown output encoding, broader best-effort secret redaction, indexed test overlap and bounded API analysis workers. See the [dated audit](docs/PRODUCTION_AUDIT_2026-10-22.md) for evidence and open release gates. `npm run benchmark`, `npm run evaluate`, `npm run test:package` and `npm run test:container` provide repeatable checks. The evaluation corpus is synthetic; no real-world accuracy or time-saved claim is established. Related-test details are capped at 20 per candidate with full counts and truncation labels; scores still use all matches.
+
+The illustrations below are purpose-built SVGs based on the actual UI, source modules, and sample fixture. Local browser-check screenshots and their limitations are referenced in the [dated audit](docs/PRODUCTION_AUDIT_2026-10-22.md); no demo recording is included.
 
 ### Product overview
 

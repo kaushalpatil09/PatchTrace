@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { analyzeIncident } from '../src/core/analysis.mjs';
+import { benchmarkBundle } from '../scripts/benchmark-analysis.mjs';
 import { createPatchTraceServer, validateApiRequest, validateApiResponse } from '../server.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -49,6 +50,40 @@ test('rejects unauthenticated API requests', async () => {
   assert.equal(response.status, 401);
   const body = await response.json();
   assert.equal(body.error.code, 'unauthorized');
+});
+
+test('bounds concurrent analysis while health remains responsive and releases its slot', async () => {
+  const headers = { cookie, 'content-type': 'application/json' };
+  const body = JSON.stringify(benchmarkBundle());
+  const responses = await Promise.all([
+    fetch(`${base}/api/analyze`, { method: 'POST', headers, body }),
+    fetch(`${base}/api/analyze`, { method: 'POST', headers, body }),
+    fetch(`${base}/api/health`)
+  ]);
+  assert.deepEqual(responses.slice(0, 2).map(r => r.status).sort(), [200, 503]);
+  const busy = responses.find(r => r.status === 503);
+  assert.equal((await busy.json()).error.code, 'analysis_busy');
+  assert.equal(responses[2].status, 200);
+  await Promise.all(responses.filter(r => r !== busy).map(r => r.arrayBuffer()));
+  const next = await fetch(`${base}/api/analyze`, { method: 'POST', headers, body: JSON.stringify(fixture) });
+  assert.equal(next.status, 200);
+  await next.arrayBuffer();
+});
+
+test('returns a stable workload rejection and preserves raw-analysis versus redacted-report semantics', async () => {
+  const headers = { cookie, 'content-type': 'application/json' };
+  const excessive = await fetch(`${base}/api/analyze`, { method: 'POST', headers,
+    body: JSON.stringify(benchmarkBundle(600, 2000, 50)) });
+  assert.equal(excessive.status, 422);
+  assert.equal((await excessive.json()).error.code, 'analysis_limit');
+  const input = structuredClone(fixture);
+  input.title = 'API_SECRET_KEY=CANARY-API-012345';
+  const raw = await fetch(`${base}/api/analyze`, { method: 'POST', headers, body: JSON.stringify(input) });
+  const analysis = await raw.json();
+  assert.ok(analysis.incident.title.includes('CANARY-API-012345'));
+  const report = await fetch(`${base}/api/report`, { method: 'POST', headers, body: JSON.stringify({ analysis }) });
+  assert.equal(report.status, 200);
+  assert.ok(!(await report.text()).includes('CANARY-API-012345'));
 });
 
 test('validates shared API request and response contracts', async () => {
